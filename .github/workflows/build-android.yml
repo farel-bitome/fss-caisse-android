@@ -30,6 +30,14 @@ jobs:
       - name: Installer les dépendances npm
         run: npm install
 
+      - name: Synchroniser le projet Capacitor Android
+        # android/.gitignore (généré par Capacitor) exclut volontairement
+        # capacitor-cordova-android-plugins/, assets/public/, capacitor.config.json et
+        # capacitor.plugins.json — ce sont des fichiers dérivés, régénérés ici plutôt que
+        # commités (comportement standard Capacitor). Sans cette étape, Gradle échoue en
+        # cherchant capacitor-cordova-android-plugins/cordova.variables.gradle, absent du dépôt.
+        run: npx cap sync android
+
       - name: Régénérer file.list / dir.list (nodejs-project)
         run: node scripts/generate-node-asset-lists.js
 
