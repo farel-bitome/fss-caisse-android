@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>FSS-CAISSE — Activation</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, sans-serif;
+    background: #0e0e0e;
+    color: #eee;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .box {
+    background: #1c1c1c;
+    padding: 40px 44px;
+    border-radius: 12px;
+    width: 440px;
+    text-align: left;
+    border: 1px solid #2a2a2a;
+  }
+  h1 { color: #CC0000; font-size: 22px; margin: 0 0 4px; text-align: center; }
+  p.sub { color: #999; font-size: 13px; margin: 0 0 22px; text-align: center; }
+  p.info { color: #ccc; font-size: 12.5px; line-height: 1.5; margin: 0 0 18px; }
+  label { display: block; font-size: 12px; color: #999; margin-bottom: 6px; }
+  .field { margin-bottom: 16px; }
+  .row { display: flex; gap: 8px; }
+  input {
+    width: 100%;
+    padding: 11px 12px;
+    background: #0e0e0e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    color: #eee;
+    font-family: 'Consolas', monospace;
+    font-size: 14px;
+    letter-spacing: 1px;
+  }
+  input:focus { outline: none; border-color: #CC0000; }
+  button {
+    padding: 11px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .btn-primary { background: #CC0000; color: #fff; width: 100%; margin-top: 6px; }
+  .btn-primary:hover { background: #a30000; }
+  .btn-secondary { background: #0e0e0e; border: 1px solid #333; color: #eee; flex-shrink: 0; }
+  .error { color: #ff6b6b; font-size: 12px; min-height: 16px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1 id="title">Activation requise</h1>
+  <p class="sub" id="subtitle">FSS-CAISSE doit être activé pour ce PC</p>
+  <p class="info" id="info-text">Communiquez l'identifiant ci-dessous à FALLSERVICES&amp;SOLUTIONS INFO pour recevoir votre clé d'activation.</p>
+
+  <div class="field">
+    <label>Identifiant de ce PC</label>
+    <div class="row">
+      <input type="text" id="machine-id" readonly>
+      <button class="btn-secondary" id="copy-btn">Copier</button>
+    </div>
+  </div>
+
+  <div id="activation-form">
+    <div class="field">
+      <label>Clé d'activation</label>
+      <input type="text" id="license-key" placeholder="XXXX-XXXX-XXXX-XXXX">
+    </div>
+    <p class="error" id="error"></p>
+    <button class="btn-primary" id="activate-btn">Activer</button>
+  </div>
+
+  <div id="activated-state" style="display:none;">
+    <div style="background:rgba(68,255,136,0.1); border:1px solid #44FF88; border-radius:8px; padding:14px; text-align:center; margin-bottom:14px;">
+      <div style="font-size:28px; margin-bottom:6px;">✅</div>
+      <div style="color:#44FF88; font-weight:bold; font-size:14px;">Application activée sur ce PC</div>
+    </div>
+    <button class="btn-secondary" id="continue-btn" style="width:100%; padding:11px;">Continuer</button>
+  </div>
+</div>
+
+<script>
+  window.electronAPI.getMachineId().then((id) => {
+    document.getElementById('machine-id').value = id;
+  });
+
+  window.electronAPI.isLicensed().then((licensed) => {
+    if (licensed) {
+      document.getElementById('title').textContent = 'FSS-CAISSE';
+      document.getElementById('subtitle').textContent = '✓ Déjà activé';
+      document.getElementById('info-text').style.display = 'none';
+      document.getElementById('activation-form').style.display = 'none';
+      document.getElementById('activated-state').style.display = 'block';
+      return;
+    }
+    window.electronAPI.getTrialStatus().then((trial) => {
+      document.getElementById('subtitle').textContent = trial.expired
+        ? "Période d'essai de 3 jours terminée"
+        : `Version d'essai — ${trial.daysLeft} jour(s) restant(s)`;
+    });
+  });
+
+  document.getElementById('continue-btn').addEventListener('click', () => {
+    window.electronAPI.reloadApp();
+  });
+
+  document.getElementById('copy-btn').addEventListener('click', () => {
+    const input = document.getElementById('machine-id');
+    navigator.clipboard.writeText(input.value);
+    const btn = document.getElementById('copy-btn');
+    const original = btn.textContent;
+    btn.textContent = 'Copié !';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  });
+
+  document.getElementById('activate-btn').addEventListener('click', async () => {
+    const key = document.getElementById('license-key').value.trim();
+    const errorEl = document.getElementById('error');
+    if (!key) { errorEl.textContent = "Veuillez saisir une clé d'activation."; return; }
+    const result = await window.electronAPI.activateLicense(key);
+    if (result.success) {
+      window.electronAPI.reloadApp();
+    } else {
+      errorEl.textContent = result.error || 'Clé invalide.';
+    }
+  });
+
+  document.getElementById('license-key').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('activate-btn').click();
+  });
+</script>
+</body>
+</html>

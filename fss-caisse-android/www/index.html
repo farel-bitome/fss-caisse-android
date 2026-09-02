@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>FSS-CAISSE TPE</title>
+<style>
+  body { font-family: Arial, sans-serif; background:#0e0e0e; color:#eee; display:flex;
+         align-items:center; justify-content:center; height:100vh; margin:0; }
+  .msg { text-align:center; }
+  .msg h1 { color:#CC0000; margin-bottom:6px; }
+  .spinner { width:28px; height:28px; border:3px solid #333; border-top-color:#CC0000;
+             border-radius:50%; margin:18px auto 0; animation:spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="msg">
+  <h1>FSS-CAISSE TPE</h1>
+  <div>Démarrage…</div>
+  <div class="spinner"></div>
+</div>
+<script>
+// window.__fssBoot() est fourni par android-bridge.js (injecté nativement par MainActivity
+// avant le chargement de cette page). Il reproduit la logique de boot() dans main.js (version
+// bureau) : aucun rôle -> choice.html ; rôle "server" -> démarre le serveur embarqué puis
+// bascule dessus ; rôle "client" -> se connecte directement au serveur PC enregistré.
+function attemptBoot(retriesLeft) {
+  if (window.__fssBoot) {
+    window.__fssBoot();
+  } else if (retriesLeft > 0) {
+    setTimeout(function () { attemptBoot(retriesLeft - 1); }, 100);
+  } else {
+    document.querySelector('.msg div').textContent = 'Erreur : pont natif introuvable.';
+  }
+}
+document.addEventListener('deviceready', function () { attemptBoot(30); }, false);
+// Filet de sécurité si l'événement deviceready n'arrive jamais (ne devrait pas arriver).
+setTimeout(function () { attemptBoot(30); }, 2000);
+</script>
+</body>
+</html>

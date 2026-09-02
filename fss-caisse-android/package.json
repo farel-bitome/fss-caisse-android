@@ -1,0 +1,16 @@
+{
+  "name": "fss-caisse-tpe",
+  "version": "1.0.0",
+  "description": "FSS-CAISSE TPE - Application Android (client + autonome) pour terminaux de paiement",
+  "scripts": {
+    "sync": "npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "nodejs-mobile-cordova": "^0.4.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

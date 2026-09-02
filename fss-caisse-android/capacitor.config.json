@@ -1,0 +1,10 @@
+{
+  "appId": "com.fss.caisse",
+  "appName": "FSS-CAISSE TPE",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  }
+}

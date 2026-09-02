@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FSS-CAISSE TPE communique en HTTP simple (pas HTTPS) avec :
+    - le serveur embarqué local (127.0.0.1) en mode autonome
+    - le PC serveur sur le réseau local (Wi-Fi du restaurant/boutique) en mode client
+  Il n'y a jamais de trafic sensible sur Internet en clair : tout reste sur le réseau local.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

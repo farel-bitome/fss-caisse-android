@@ -1,0 +1,67 @@
+name: Build Android (FSS-CAISSE TPE)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Installer le NDK (requis par nodejs-mobile-cordova)
+        run: |
+          echo "y" | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Installer les dépendances npm
+        run: npm install
+
+      - name: Régénérer file.list / dir.list (nodejs-project)
+        run: node scripts/generate-node-asset-lists.js
+
+      - name: Compiler l'APK debug (sideload)
+        working-directory: android
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Compiler l'AAB release (Play Store)
+        working-directory: android
+        env:
+          FSS_KEYSTORE_BASE64: ${{ secrets.FSS_KEYSTORE_BASE64 }}
+          FSS_KEYSTORE_PASSWORD: ${{ secrets.FSS_KEYSTORE_PASSWORD }}
+          FSS_KEY_ALIAS: ${{ secrets.FSS_KEY_ALIAS }}
+          FSS_KEY_PASSWORD: ${{ secrets.FSS_KEY_PASSWORD }}
+        run: |
+          if [ -n "$FSS_KEYSTORE_BASE64" ]; then
+            echo "$FSS_KEYSTORE_BASE64" | base64 -d > app/fss-release.keystore
+            ./gradlew bundleRelease --stacktrace
+          else
+            echo "Secrets de signature absents (FSS_KEYSTORE_BASE64...) — AAB release ignoré."
+            echo "Voir README.md > 'Signer pour le Play Store' pour les créer."
+          fi
+
+      - name: Publier l'APK debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: fss-caisse-tpe-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Publier l'AAB release (si signé)
+        if: hashFiles('android/app/build/outputs/bundle/release/*.aab') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: fss-caisse-tpe-release-aab
+          path: android/app/build/outputs/bundle/release/*.aab

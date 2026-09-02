@@ -1,0 +1,20 @@
+# Dépendances de l'outillage (Capacitor CLI...) — PAS le node_modules de nodejs-project,
+# qui lui doit être commité car il est embarqué tel quel dans l'APK.
+/node_modules/
+
+# Sorties de build
+/android/app/build/
+/android/build/
+/android/.gradle/
+/android/capacitor-cordova-android-plugins/build/
+*.apk
+*.aab
+
+# Secrets — ne jamais committer le keystore de signature
+/android/app/fss-release.keystore
+*.keystore
+*.jks
+
+# Divers
+.DS_Store
+local.properties

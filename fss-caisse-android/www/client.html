@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>FSS-CAISSE — Connexion</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, sans-serif;
+    background: #0e0e0e;
+    color: #eee;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .box {
+    background: #1c1c1c;
+    padding: 36px 40px;
+    border-radius: 12px;
+    width: 360px;
+    text-align: center;
+    border: 1px solid #2a2a2a;
+  }
+  h1 { color: #CC0000; font-size: 22px; margin: 0 0 4px; }
+  p { color: #999; font-size: 12px; margin: 0 0 22px; }
+  label { display:block; text-align:left; font-size: 11px; color:#888; margin-bottom: 4px; }
+  input {
+    width: 100%;
+    padding: 11px;
+    margin-bottom: 14px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    background: #0e0e0e;
+    color: #fff;
+    font-size: 14px;
+  }
+  input:focus { outline: none; border-color: #CC0000; }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 6px;
+    background: #CC0000;
+    color: #fff;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button:hover { background: #a80000; }
+  .err { color: #FF4444; font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .back { margin-top: 14px; font-size: 11px; color: #666; cursor: pointer; }
+  .back:hover { color: #999; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>FSS-CAISSE</h1>
+  <p>Connexion au serveur central</p>
+  <label>Adresse IP du serveur</label>
+  <input id="ip" placeholder="ex: 192.168.1.24" autofocus>
+  <label>Port</label>
+  <input id="port" placeholder="3000" value="3000">
+  <button onclick="connect()">Se connecter</button>
+  <div class="err" id="err"></div>
+</div>
+<script>
+  window.electronAPI.getCurrentServer().then(function (url) {
+    if (url) {
+      var m = url.match(/http:\/\/([^:]+):(\d+)/);
+      if (m) {
+        document.getElementById('ip').value = m[1];
+        document.getElementById('port').value = m[2];
+      }
+    }
+  });
+
+  function connect() {
+    var ip = document.getElementById('ip').value.trim();
+    var port = document.getElementById('port').value.trim() || '3000';
+    if (!ip) {
+      document.getElementById('err').textContent = "Merci d'entrer une adresse IP";
+      return;
+    }
+    document.getElementById('err').textContent = '';
+    window.electronAPI.saveServer(ip, port);
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') connect();
+  });
+</script>
+</body>
+</html>

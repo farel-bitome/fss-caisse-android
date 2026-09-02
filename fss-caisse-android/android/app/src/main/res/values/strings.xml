@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FSS-CAISSE TPE</string>
+    <string name="title_activity_main">FSS-CAISSE TPE</string>
+    <string name="package_name">com.fss.caisse</string>
+    <string name="custom_url_scheme">com.fss.caisse</string>
+</resources>
