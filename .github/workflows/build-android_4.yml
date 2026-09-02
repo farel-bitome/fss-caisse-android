@@ -38,6 +38,15 @@ jobs:
         # cherchant capacitor-cordova-android-plugins/cordova.variables.gradle, absent du dépôt.
         run: npx cap sync android
 
+      - name: Créer le dossier www attendu par nodejs-mobile-cordova
+        # Le build.gradle de nodejs-mobile-cordova exige un dossier
+        # src/main/assets/www/ à l'intérieur du module capacitor-cordova-android-plugins
+        # (une convention Cordova classique que "cap sync" ne recrée pas). Il ne sert qu'à
+        # cette vérification — le vrai contenu Node.js embarqué reste dans
+        # android/app/src/main/assets/www/nodejs-project/, à l'endroit que lit NodeJS.java
+        # au démarrage de l'appli.
+        run: mkdir -p android/capacitor-cordova-android-plugins/src/main/assets/www
+
       - name: Régénérer file.list / dir.list (nodejs-project)
         run: node scripts/generate-node-asset-lists.js
 
