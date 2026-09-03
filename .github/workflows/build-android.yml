@@ -47,15 +47,35 @@ jobs:
         # au démarrage de l'appli.
         run: mkdir -p android/capacitor-cordova-android-plugins/src/main/assets/www
 
-      - name: Copier les sources natives cdvnodejsmobile dans app/libs
-        # Le module :app compile lui aussi le CMake natif du plugin (voir
-        # app/capacitor.build.gradle), et attend une copie de ces sources directement dans
-        # android/app/libs/cdvnodejsmobile — "cap sync" ne refait ce copiage que lors d'un
-        # "cap add" complet, pas d'un sync classique. On le garantit explicitement ici,
-        # indépendamment de ce que Capacitor a ou non recopié.
+      - name: Copier les sources natives cdvnodejsmobile (app + module plugin)
+        # "cap sync" copie bien android/capacitor-cordova-android-plugins/.../cdvnodejsmobile,
+        # mais AUCUNE des deux copies (module plugin ni :app) ne reproduit fidèlement ce que
+        # ferait un vrai "cordova prepare" : plugin.xml (ligne "libs/android/libnode/" →
+        # "libs/cdvnodejsmobile/") attend que le dossier libnode/ soit copié AVEC son nom
+        # (résultat : libs/cdvnodejsmobile/libnode/...), alors que la copie Capacitor aplatit
+        # ce niveau. Et le hook Cordova qui décompresse les binaires libnode.so.gz en .so ne
+        # tourne pas non plus sous Capacitor. On reconstruit donc la structure exacte
+        # directement depuis node_modules, pour les DEUX modules qui compilent ce code natif
+        # (:app et :capacitor-cordova-android-plugins), sans dépendre de ces deux mécanismes.
         run: |
-          mkdir -p android/app/libs
-          cp -r android/capacitor-cordova-android-plugins/src/main/libs/cdvnodejsmobile android/app/libs/cdvnodejsmobile
+          SRC=node_modules/nodejs-mobile-cordova
+          rebuild() {
+            DEST="$1"
+            rm -rf "$DEST"
+            mkdir -p "$DEST"
+            cp "$SRC/src/common/cordova-bridge/cordova-bridge.cpp" "$DEST/"
+            cp "$SRC/src/common/cordova-bridge/cordova-bridge.h" "$DEST/"
+            cp "$SRC/src/android/jni/native-lib.cpp" "$DEST/"
+            cp "$SRC/src/android/CMakeLists.txt" "$DEST/"
+            cp -r "$SRC/libs/android/libnode" "$DEST/libnode"
+            for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+              gzip -df "$DEST/libnode/bin/$abi/libnode.so.gz"
+            done
+          }
+          rebuild android/app/libs/cdvnodejsmobile
+          rebuild android/capacitor-cordova-android-plugins/src/main/libs/cdvnodejsmobile
+          find android/app/libs/cdvnodejsmobile -maxdepth 1
+          ls -la android/app/libs/cdvnodejsmobile/libnode/bin/arm64-v8a/
 
       - name: Régénérer file.list / dir.list (nodejs-project)
         run: node scripts/generate-node-asset-lists.js
