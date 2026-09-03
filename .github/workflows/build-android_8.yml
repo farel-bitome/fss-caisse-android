@@ -73,7 +73,7 @@ jobs:
             done
           }
           rebuild android/app/libs/cdvnodejsmobile
-          rebuild android/capacitor-cordova-android-plugins/src/main/libs/cdvnodejsmobile
+          rebuild android/capacitor-cordova-android-plugins/libs/cdvnodejsmobile
           find android/app/libs/cdvnodejsmobile -maxdepth 1
           ls -la android/app/libs/cdvnodejsmobile/libnode/bin/arm64-v8a/
 
