@@ -97,11 +97,25 @@
 
   function startEmbeddedServer() {
     return new Promise(function (resolve) {
+      // Écoute les événements que main.js remonte depuis le côté Node (voir report() dans
+      // nodejs-project/main.js) — permet d'afficher la VRAIE erreur immédiatement, au lieu
+      // d'attendre un timeout générique de 20s qui ne dit pas pourquoi ça a échoué.
+      if (window.nodejs && window.nodejs.channel && !window.__fssServerListenerSet) {
+        window.__fssServerListenerSet = true;
+        window.nodejs.channel.on('server-error', function (info) {
+          window.__fssServerLastError = (info && info.message) ? info.message : String(info);
+          showStatus('Erreur du serveur embarqué :\n' + window.__fssServerLastError);
+        });
+        window.nodejs.channel.on('server-ready', function () {
+          window.__fssServerLastError = null;
+        });
+      }
+
       // nodejs-mobile-cordova ne supporte qu'un seul démarrage par processus applicatif —
       // sans ce garde-fou, revenir sur cette page (ex: après reloadApp() suite à une
       // activation de licence) tenterait de redémarrer Node et échouerait.
       if (window.__fssNodeStarted) {
-        waitForServer(8000).then(function (ok) { hideStatus(); resolve(ok); });
+        waitForServer(8000).then(function (ok) { if (ok) hideStatus(); resolve(ok); });
         return;
       }
       if (!(window.nodejs && window.nodejs.start)) {
@@ -127,9 +141,13 @@
       // peut prendre plus d'une seconde selon l'appareil.
       waitForServer(20000).then(function (ok) {
         if (!ok) {
-          showStatus('Le serveur embarqué ne répond pas après 20s.\n' +
-            'Vérifie que le TPE a assez d\'espace de stockage libre, puis relance l\'appli.\n' +
-            'Si le problème persiste, ceci est le message à transmettre pour diagnostic.');
+          // Si main.js a signalé une erreur précise entre-temps, elle est déjà affichée par
+          // le listener ci-dessus — on ne l'écrase pas avec le message générique.
+          if (!window.__fssServerLastError) {
+            showStatus('Le serveur embarqué ne répond pas après 20s.\n' +
+              'Vérifie que le TPE a assez d\'espace de stockage libre, puis relance l\'appli.\n' +
+              'Si le problème persiste, ceci est le message à transmettre pour diagnostic.');
+          }
         } else {
           hideStatus();
         }
