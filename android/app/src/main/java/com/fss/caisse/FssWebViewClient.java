@@ -1,5 +1,6 @@
 package com.fss.caisse;
 
+import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 
 import com.getcapacitor.Bridge;
@@ -17,6 +18,17 @@ public class FssWebViewClient extends BridgeWebViewClient {
 
     public FssWebViewClient(Bridge bridge) {
         super(bridge);
+    }
+
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+        // Par défaut, Capacitor fait sortir toute navigation en dehors de son propre bundle
+        // (une protection pensée pour ne pas charger du contenu web non maîtrisé dans l'appli)
+        // vers le navigateur externe — c'est exactement ce qui empêchait 127.0.0.1:3000 et le
+        // serveur PC en LAN de s'ouvrir dans l'appli. Ici ces adresses sont entièrement
+        // pilotées par l'appli elle-même (jamais un lien cliqué par l'utilisateur), donc on
+        // charge toujours dans notre propre WebView, jamais dans un navigateur externe.
+        return false;
     }
 
     @Override
