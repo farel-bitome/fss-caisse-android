@@ -1775,7 +1775,7 @@ function mettreEnAttente(){
   // deux mécanismes totalement indépendants dans le code : payer une commande
   // (valPay/imprimerRecu) n'appelle jamais cette fonction ni printBatches.
   if(deltaItems.length){
-    printBatches.push({batchId:id+'-'+Date.now(),attenteId:id,tableNom:tableNom,srv:srv,heure:heure,items:deltaItems,ajout:!!resumingAttenteId});
+    printBatches.push({batchId:id+'-'+Date.now(),attenteId:id,tableNom:tableNom,srv:srv,heure:heure,items:deltaItems,ajout:!!resumingAttenteId,posteId:window.FSS_POSTE_ID});
   }
   resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;
   libererTable();clearTk(true);

@@ -16,6 +16,11 @@
   var prevBatchIds = null;
   var prevTxIds = null;
   window.FSS_IS_SERVER = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '');
+  // Identifiant unique de ce poste pour la durée de la session (re-généré à chaque
+  // rechargement) — permet à un poste client de reconnaître "ses propres" bons de
+  // commande dans le flux synchronisé, pour imprimer sa copie localement sans imprimer
+  // aussi celles des autres postes.
+  window.FSS_POSTE_ID = 'poste-' + Math.random().toString(36).slice(2) + '-' + Date.now();
   window.users = window.users || [];
   window.nextUserId = window.nextUserId || 1;
   window.logoData = window.logoData || null;
@@ -86,6 +91,18 @@
           } else {
             if (window.imprimerTicketAttente) window.imprimerTicketAttente(batch);
           }
+        });
+      });
+    } else if (!window.FSS_IS_SERVER && prevBatchIds !== null) {
+      // Poste client (TPE ou PC) : n'imprime QUE ses propres bons de commande (jamais
+      // ceux des autres postes, jamais les bilans de clôture — réservés au serveur),
+      // en plus de l'exemplaire que le serveur imprime déjà de son côté.
+      var mesLots = printBatches.filter(function (bt) {
+        return prevBatchIds.indexOf(bt.batchId) === -1 && bt.type !== 'cloture' && bt.posteId === window.FSS_POSTE_ID;
+      });
+      mesLots.forEach(function (batch) {
+        safe(function () {
+          if (window.imprimerTicketAttente) window.imprimerTicketAttente(batch);
         });
       });
     }
