@@ -7,6 +7,9 @@
 /android/build/
 /android/.gradle/
 /android/capacitor-cordova-android-plugins/build/
+# Régénérés à chaque build par le workflow CI (voir build-android.yml) — volumineux (~180 Mo
+# avec les binaires libnode), inutile de les committer.
+/android/app/libs/
 *.apk
 *.aab
 

@@ -128,6 +128,29 @@ calculer l'identifiant machine Android, les clés ne correspondront pas tant que
 Le plus sûr : générer une clé avec l'identifiant qu'affiche `activation.html` sur un TPE réel et
 vérifier qu'elle correspond à ce que produirait le générateur existant.
 
+## Fiabilité du mode autonome
+
+Sans précaution particulière, Android peut tuer l'appli (et donc le serveur Node embarqué)
+dès que l'écran s'éteint ou qu'elle passe en arrière-plan — inacceptable pour un TPE censé
+servir en continu. Trois mesures ajoutées pour éviter ça :
+
+- **Foreground service** (`FssServerService.java`), démarré automatiquement dès que le rôle
+  "autonome" est actif. Une notification discrète et permanente ("Serveur de caisse actif")
+  indique au système que l'appli rend un service actif — ça réduit très fortement le risque
+  d'être tuée pour libérer de la mémoire.
+- **Wake lock partiel** : garde le CPU réveillé même écran éteint, pour que les autres postes
+  (clients Android/PC) puissent continuer à interroger le serveur sans latence.
+- **Écran maintenu allumé** (`FLAG_KEEP_SCREEN_ON`) pendant l'utilisation de l'appli — cohérent
+  avec un TPE affiché en continu au comptoir. L'appareil reste verrouillable manuellement.
+
+Sur Android 13+, l'appli demande la permission de notification au premier lancement
+(nécessaire pour afficher celle du foreground service).
+
+Pour une fiabilité maximale sur le terrain, il est recommandé en plus d'exclure l'appli de
+l'optimisation de batterie du fabricant (Réglages → Batterie → FSS-CAISSE TPE → Sans
+restriction) — certains fabricants de TPE (dont Sunmi) ont leurs propres mécanismes
+d'économie d'énergie agressifs qui ignorent parfois les APIs Android standard.
+
 ## Limites connues / à trancher
 
 - **`openBackupFileDialog`** (restauration manuelle d'une sauvegarde) : pas de sélecteur de

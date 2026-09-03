@@ -26,6 +26,11 @@
 
         </activity>
 
+        <service
+            android:name=".FssServerService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -43,4 +48,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Requis pour que le serveur de caisse embarqué (mode autonome) continue de tourner
+         écran éteint ou appli en arrière-plan — voir FssServerService. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Android 13+ exige cette permission pour afficher la notification du foreground service. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

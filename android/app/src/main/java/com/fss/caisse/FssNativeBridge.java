@@ -1,6 +1,7 @@
 package com.fss.caisse;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -126,6 +127,22 @@ public class FssNativeBridge {
                 int port = args.optInt("port", 3000);
                 String url = "http://" + ip + ":" + port + "/";
                 prefs().edit().putString("role", "client").putString("serverUrl", url).apply();
+                stopServerServiceInternal();
+                respond(callbackId, ok());
+                break;
+            }
+            case "startServerService": {
+                Intent intent = new Intent(context, FssServerService.class);
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent);
+                } else {
+                    context.startService(intent);
+                }
+                respond(callbackId, ok());
+                break;
+            }
+            case "stopServerService": {
+                stopServerServiceInternal();
                 respond(callbackId, ok());
                 break;
             }
@@ -337,6 +354,10 @@ public class FssNativeBridge {
     }
 
     // ---------------------------------------------------------------------------------------
+    private void stopServerServiceInternal() {
+        context.stopService(new Intent(context, FssServerService.class));
+    }
+
     private String getLocalIp() {
         try {
             java.util.Enumeration<java.net.NetworkInterface> ifaces = java.net.NetworkInterface.getNetworkInterfaces();

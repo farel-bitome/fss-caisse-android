@@ -36,13 +36,24 @@
   // ---- Démarrage/navigation, équivalent de boot()/showClientScreen() dans main.js (Electron) ----
   function startEmbeddedServer() {
     return new Promise(function (resolve) {
+      // nodejs-mobile-cordova ne supporte qu'un seul démarrage par processus applicatif —
+      // sans ce garde-fou, revenir sur cette page (ex: après reloadApp() suite à une
+      // activation de licence) tenterait de redémarrer Node et échouerait.
+      if (window.__fssNodeStarted) {
+        resolve(true);
+        return;
+      }
       if (!(window.nodejs && window.nodejs.start)) {
         resolve(false);
         return;
       }
+      window.__fssNodeStarted = true;
       window.nodejs.start('main.js', function (err) {
-        if (err) { resolve(false); return; }
+        if (err) { window.__fssNodeStarted = false; resolve(false); return; }
       });
+      // Démarre aussi le service au premier plan côté natif (voir FssServerService) pour que
+      // le TPE continue à servir même écran éteint ou appli en arrière-plan.
+      call('startServerService', {});
       // Laisse le temps à Express de commencer à écouter avant de naviguer dessus.
       setTimeout(function () { resolve(true); }, 1200);
     });
