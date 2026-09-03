@@ -1,0 +1,140 @@
+name: Build Android (FSS-CAISSE TPE)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Installer le NDK (requis par nodejs-mobile-cordova)
+        run: |
+          echo "y" | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Installer les dépendances npm
+        run: npm install
+
+      - name: Synchroniser le projet Capacitor Android
+        # android/.gitignore (généré par Capacitor) exclut volontairement
+        # capacitor-cordova-android-plugins/, assets/public/, capacitor.config.json et
+        # capacitor.plugins.json — ce sont des fichiers dérivés, régénérés ici plutôt que
+        # commités (comportement standard Capacitor). Sans cette étape, Gradle échoue en
+        # cherchant capacitor-cordova-android-plugins/cordova.variables.gradle, absent du dépôt.
+        run: npx cap sync android
+
+      - name: Créer le dossier www attendu par nodejs-mobile-cordova
+        # Le build.gradle de nodejs-mobile-cordova exige un dossier
+        # src/main/assets/www/ à l'intérieur du module capacitor-cordova-android-plugins
+        # (une convention Cordova classique que "cap sync" ne recrée pas). Il ne sert qu'à
+        # cette vérification — le vrai contenu Node.js embarqué reste dans
+        # android/app/src/main/assets/www/nodejs-project/, à l'endroit que lit NodeJS.java
+        # au démarrage de l'appli.
+        run: mkdir -p android/capacitor-cordova-android-plugins/src/main/assets/www
+
+      - name: Copier les sources natives cdvnodejsmobile (app + module plugin)
+        # "cap sync" copie bien android/capacitor-cordova-android-plugins/.../cdvnodejsmobile,
+        # mais AUCUNE des deux copies (module plugin ni :app) ne reproduit fidèlement ce que
+        # ferait un vrai "cordova prepare" : plugin.xml (ligne "libs/android/libnode/" →
+        # "libs/cdvnodejsmobile/") attend que le dossier libnode/ soit copié AVEC son nom
+        # (résultat : libs/cdvnodejsmobile/libnode/...), alors que la copie Capacitor aplatit
+        # ce niveau. Et le hook Cordova qui décompresse les binaires libnode.so.gz en .so ne
+        # tourne pas non plus sous Capacitor. On reconstruit donc la structure exacte
+        # directement depuis node_modules, pour les DEUX modules qui compilent ce code natif
+        # (:app et :capacitor-cordova-android-plugins), sans dépendre de ces deux mécanismes.
+        run: |
+          SRC=node_modules/nodejs-mobile-cordova
+          rebuild() {
+            DEST="$1"
+            rm -rf "$DEST"
+            mkdir -p "$DEST"
+            cp "$SRC/src/common/cordova-bridge/cordova-bridge.cpp" "$DEST/"
+            cp "$SRC/src/common/cordova-bridge/cordova-bridge.h" "$DEST/"
+            cp "$SRC/src/android/jni/native-lib.cpp" "$DEST/"
+            cp "$SRC/src/android/CMakeLists.txt" "$DEST/"
+            cp -r "$SRC/libs/android/libnode" "$DEST/libnode"
+            for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+              gzip -df "$DEST/libnode/bin/$abi/libnode.so.gz"
+            done
+          }
+          rebuild android/app/libs/cdvnodejsmobile
+          rebuild android/capacitor-cordova-android-plugins/libs/cdvnodejsmobile
+          find android/app/libs/cdvnodejsmobile -maxdepth 1
+          ls -la android/app/libs/cdvnodejsmobile/libnode/bin/arm64-v8a/
+
+      - name: Régénérer file.list / dir.list (nodejs-project)
+        run: node scripts/generate-node-asset-lists.js
+
+      - name: Rendre gradlew exécutable
+        # gradlew perd son bit d'exécution en passant par un système de fichiers Windows
+        # (via un zip ou un commit depuis GitHub Desktop) — on le rétablit explicitement.
+        run: chmod +x android/gradlew
+
+      - name: Compiler l'APK debug (sideload)
+        working-directory: android
+        run: ./gradlew assembleDebug --stacktrace --info > /tmp/gradle-debug.log 2>&1 || true
+
+      - name: Extraire l'erreur de compilation (si échec)
+        # Par défaut Gradle masque la sortie détaillée — --info la fait apparaître, mais noyée
+        # dans des milliers de lignes. Plutôt que de deviner des mots-clés (qui varient selon
+        # le type d'erreur), on affiche directement la fin du log : c'est systématiquement là
+        # que Gradle imprime "FAILURE: Build failed" suivi de la cause exacte.
+        if: always()
+        run: |
+          if [ -s /tmp/gradle-debug.log ] && grep -q "BUILD FAILED" /tmp/gradle-debug.log; then
+            echo "===== BUILD FAILED — 250 dernières lignes ====="
+            tail -250 /tmp/gradle-debug.log
+            echo "===== fin de l'extrait ====="
+            exit 1
+          fi
+
+      - name: Publier le log complet de compilation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-debug-log
+          path: /tmp/gradle-debug.log
+
+      - name: Compiler l'AAB release (Play Store)
+        working-directory: android
+        env:
+          FSS_KEYSTORE_BASE64: ${{ secrets.FSS_KEYSTORE_BASE64 }}
+          FSS_KEYSTORE_PASSWORD: ${{ secrets.FSS_KEYSTORE_PASSWORD }}
+          FSS_KEY_ALIAS: ${{ secrets.FSS_KEY_ALIAS }}
+          FSS_KEY_PASSWORD: ${{ secrets.FSS_KEY_PASSWORD }}
+        run: |
+          if [ -n "$FSS_KEYSTORE_BASE64" ]; then
+            echo "$FSS_KEYSTORE_BASE64" | base64 -d > app/fss-release.keystore
+            ./gradlew bundleRelease --stacktrace
+          else
+            echo "Secrets de signature absents (FSS_KEYSTORE_BASE64...) — AAB release ignoré."
+            echo "Voir README.md > 'Signer pour le Play Store' pour les créer."
+          fi
+
+      - name: Publier l'APK debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: fss-caisse-tpe-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Publier l'AAB release (si signé)
+        if: hashFiles('android/app/build/outputs/bundle/release/*.aab') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: fss-caisse-tpe-release-aab
+          path: android/app/build/outputs/bundle/release/*.aab
