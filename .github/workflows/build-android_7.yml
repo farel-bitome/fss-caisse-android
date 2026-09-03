@@ -89,15 +89,16 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --stacktrace --info > /tmp/gradle-debug.log 2>&1 || true
 
-      - name: Extraire l'erreur de compilation native (si échec)
-        # Par défaut Gradle masque la sortie du compilateur natif (clang/ninja) — d'où les
-        # précédents logs qui ne montraient qu'un "exit code 1" sans détail. --info la fait
-        # apparaître, mais noyée dans des milliers de lignes ; on isole ici les passages utiles.
+      - name: Extraire l'erreur de compilation (si échec)
+        # Par défaut Gradle masque la sortie détaillée — --info la fait apparaître, mais noyée
+        # dans des milliers de lignes. Plutôt que de deviner des mots-clés (qui varient selon
+        # le type d'erreur), on affiche directement la fin du log : c'est systématiquement là
+        # que Gradle imprime "FAILURE: Build failed" suivi de la cause exacte.
         if: always()
         run: |
           if [ -s /tmp/gradle-debug.log ] && grep -q "BUILD FAILED" /tmp/gradle-debug.log; then
-            echo "===== BUILD FAILED — extrait pertinent ====="
-            grep -n -iE "error:|FAILED:|undefined reference|fatal error|no such file|ninja:" /tmp/gradle-debug.log | tail -150
+            echo "===== BUILD FAILED — 250 dernières lignes ====="
+            tail -250 /tmp/gradle-debug.log
             echo "===== fin de l'extrait ====="
             exit 1
           fi
