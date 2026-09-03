@@ -33,29 +33,108 @@
     });
   }
 
+  // ---- Bandeau de statut flottant (diagnostic sans PC/ADB) --------------------------------
+  function showStatus(text) {
+    var el = document.getElementById('__fssStatusBanner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = '__fssStatusBanner';
+      el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:999999;' +
+        'background:#111;color:#fff;font:12px monospace;padding:8px 10px;' +
+        'border-top:2px solid #CC0000;white-space:pre-wrap;max-height:40vh;overflow:auto;';
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+  }
+  function hideStatus() {
+    var el = document.getElementById('__fssStatusBanner');
+    if (el) el.remove();
+  }
+
   // ---- Démarrage/navigation, équivalent de boot()/showClientScreen() dans main.js (Electron) ----
+  function pingServer(url, timeoutMs) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var xhr = new XMLHttpRequest();
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        try { xhr.abort(); } catch (e) {}
+        resolve(false);
+      }, timeoutMs || 1500);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4 && !done) {
+          done = true;
+          clearTimeout(timer);
+          // N'importe quelle réponse HTTP (même une erreur applicative) prouve que quelque
+          // chose écoute sur ce port — status 0 = pas de connexion du tout (serveur pas prêt).
+          resolve(xhr.status > 0);
+        }
+      };
+      try {
+        xhr.open('GET', url, true);
+        xhr.send();
+      } catch (e) {
+        done = true;
+        clearTimeout(timer);
+        resolve(false);
+      }
+    });
+  }
+
+  function waitForServer(maxWaitMs) {
+    var start = Date.now();
+    function attempt() {
+      return pingServer('http://127.0.0.1:3000/', 1500).then(function (ok) {
+        if (ok) return true;
+        if (Date.now() - start > maxWaitMs) return false;
+        showStatus('Démarrage du serveur embarqué… (' + Math.round((Date.now() - start) / 1000) + 's)');
+        return new Promise(function (r) { setTimeout(r, 500); }).then(attempt);
+      });
+    }
+    return attempt();
+  }
+
   function startEmbeddedServer() {
     return new Promise(function (resolve) {
       // nodejs-mobile-cordova ne supporte qu'un seul démarrage par processus applicatif —
       // sans ce garde-fou, revenir sur cette page (ex: après reloadApp() suite à une
       // activation de licence) tenterait de redémarrer Node et échouerait.
       if (window.__fssNodeStarted) {
-        resolve(true);
+        waitForServer(8000).then(function (ok) { hideStatus(); resolve(ok); });
         return;
       }
       if (!(window.nodejs && window.nodejs.start)) {
+        showStatus('Erreur : moteur Node.js embarqué indisponible (window.nodejs absent).\n' +
+          'Le plugin nodejs-mobile-cordova ne semble pas chargé sur cet appareil/build.');
         resolve(false);
         return;
       }
+      showStatus('Démarrage du serveur embarqué…');
       window.__fssNodeStarted = true;
       window.nodejs.start('main.js', function (err) {
-        if (err) { window.__fssNodeStarted = false; resolve(false); return; }
+        if (err) {
+          window.__fssNodeStarted = false;
+          showStatus('Erreur au démarrage de Node.js :\n' + err);
+          resolve(false);
+        }
       });
       // Démarre aussi le service au premier plan côté natif (voir FssServerService) pour que
       // le TPE continue à servir même écran éteint ou appli en arrière-plan.
       call('startServerService', {});
-      // Laisse le temps à Express de commencer à écouter avant de naviguer dessus.
-      setTimeout(function () { resolve(true); }, 1200);
+      // Attend activement que le serveur réponde réellement (jusqu'à 20s) plutôt qu'un délai
+      // fixe arbitraire — le premier démarrage (extraction des assets, chargement des modules)
+      // peut prendre plus d'une seconde selon l'appareil.
+      waitForServer(20000).then(function (ok) {
+        if (!ok) {
+          showStatus('Le serveur embarqué ne répond pas après 20s.\n' +
+            'Vérifie que le TPE a assez d\'espace de stockage libre, puis relance l\'appli.\n' +
+            'Si le problème persiste, ceci est le message à transmettre pour diagnostic.');
+        } else {
+          hideStatus();
+        }
+        resolve(ok);
+      });
     });
   }
 
@@ -71,8 +150,10 @@
       if (!cfg.role) {
         window.location.href = 'choice.html';
       } else if (cfg.role === 'server') {
-        return startEmbeddedServer().then(function () {
-          window.location.href = 'http://127.0.0.1:3000/';
+        return startEmbeddedServer().then(function (ok) {
+          if (ok) window.location.href = 'http://127.0.0.1:3000/';
+          // Si ok=false, on reste sur cette page : le bandeau de statut affiche déjà
+          // l'erreur — inutile de naviguer vers une URL qu'on sait cassée.
         });
       } else if (cfg.role === 'client' && cfg.serverUrl) {
         window.location.href = cfg.serverUrl;
@@ -86,8 +167,8 @@
     chooseRole: function (role) {
       return call('chooseRole', { role: role }).then(function (result) {
         if (role === 'server') {
-          return startEmbeddedServer().then(function () {
-            window.location.href = 'http://127.0.0.1:3000/';
+          return startEmbeddedServer().then(function (ok) {
+            if (ok) window.location.href = 'http://127.0.0.1:3000/';
             return result;
           });
         }
