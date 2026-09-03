@@ -47,6 +47,16 @@ jobs:
         # au démarrage de l'appli.
         run: mkdir -p android/capacitor-cordova-android-plugins/src/main/assets/www
 
+      - name: Copier les sources natives cdvnodejsmobile dans app/libs
+        # Le module :app compile lui aussi le CMake natif du plugin (voir
+        # app/capacitor.build.gradle), et attend une copie de ces sources directement dans
+        # android/app/libs/cdvnodejsmobile — "cap sync" ne refait ce copiage que lors d'un
+        # "cap add" complet, pas d'un sync classique. On le garantit explicitement ici,
+        # indépendamment de ce que Capacitor a ou non recopié.
+        run: |
+          mkdir -p android/app/libs
+          cp -r android/capacitor-cordova-android-plugins/src/main/libs/cdvnodejsmobile android/app/libs/cdvnodejsmobile
+
       - name: Régénérer file.list / dir.list (nodejs-project)
         run: node scripts/generate-node-asset-lists.js
 
