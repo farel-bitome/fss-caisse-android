@@ -67,7 +67,27 @@ jobs:
 
       - name: Compiler l'APK debug (sideload)
         working-directory: android
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace --info > /tmp/gradle-debug.log 2>&1 || true
+
+      - name: Extraire l'erreur de compilation native (si échec)
+        # Par défaut Gradle masque la sortie du compilateur natif (clang/ninja) — d'où les
+        # précédents logs qui ne montraient qu'un "exit code 1" sans détail. --info la fait
+        # apparaître, mais noyée dans des milliers de lignes ; on isole ici les passages utiles.
+        if: always()
+        run: |
+          if [ -s /tmp/gradle-debug.log ] && grep -q "BUILD FAILED" /tmp/gradle-debug.log; then
+            echo "===== BUILD FAILED — extrait pertinent ====="
+            grep -n -iE "error:|FAILED:|undefined reference|fatal error|no such file|ninja:" /tmp/gradle-debug.log | tail -150
+            echo "===== fin de l'extrait ====="
+            exit 1
+          fi
+
+      - name: Publier le log complet de compilation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-debug-log
+          path: /tmp/gradle-debug.log
 
       - name: Compiler l'AAB release (Play Store)
         working-directory: android
