@@ -29,22 +29,38 @@ Le TPE réutilise **exactement** le même frontend web que la version bureau (`a
 
 ## Impression
 
-- **Sunmi (toutes séries)** : fonctionnel. Utilise le service AIDL officiel et public
-  `woyou.aidlservice.jiuiv5`, déjà présent en usine sur tous les appareils Sunmi
-  (`android/app/src/main/aidl/woyou/...`, récupéré depuis le SDK public de Sunmi — aucune
-  dépendance externe à télécharger).
-- **Senraise H10S (toutes séries)** : **squelette non fonctionnel**
-  (`android/app/src/main/java/com/fss/caisse/printer/H10sPrinterDriver.java`). Senraise ne
-  publie pas son SDK imprimante publiquement (leur fiche produit mentionne un "SDK gratuit sur
-  demande"). Une fois ce SDK obtenu auprès de leur support, suivre les instructions en tête de
-  ce fichier pour le brancher — la détection du modèle (`PrinterDriverFactory.java`) route déjà
-  automatiquement les appareils Sunmi vers leur driver et tout le reste (H10S y compris) vers
-  celui-ci.
-- Le rendu : le ticket HTML (identique à celui de la version bureau) est rendu dans une WebView
-  invisible puis converti en image, envoyée telle quelle à l'imprimante
-  (`printer/HtmlToBitmap.java`). Ça évite de reprogrammer toute la mise en page en commandes
-  ESC/POS — tout changement visuel fait côté web (dans `index.html`) s'applique aussi à
-  l'impression TPE sans rien retoucher côté Android.
+Détection **universelle**, indépendante du texte `Build.MANUFACTURER`/`MODEL` (peu fiable sur les
+nombreux clones/OEM en marque blanche) : `PrinterDriverFactory.java` interroge directement le
+`PackageManager` pour voir quel service d'impression est réellement installé sur *cet* appareil,
+et choisit le driver correspondant :
+
+1. **Sunmi (toutes séries : V1/V1s, V2/V2 Pro/V2s, V3, P1/P1 4G, T1/T2/T2 mini/T2s, D2, S2...)** :
+   fonctionnel. Utilise le service AIDL officiel et public `woyou.aidlservice.jiuiv5`, déjà présent
+   en usine sur tous les appareils Sunmi (`android/app/src/main/aidl/woyou/...`, récupéré depuis
+   le SDK public de Sunmi — aucune dépendance externe à télécharger).
+2. **Senraise H10 / H10C / H10S / H10P (toutes séries)** : fonctionnel. Utilise le service
+   embarqué `recieptservice.com.recieptservice`
+   (`android/app/src/main/java/com/fss/caisse/printer/H10sPrinterDriver.java`), via l'interface
+   AIDL `PrinterInterface` (source communautaire, licence BSD-3, dans
+   `android/app/src/main/java/recieptservice/`) — le même mécanisme déjà validé dans FSS-CALCUL,
+   projet sœur du même éditeur pour les mêmes familles de TPE.
+3. **Secours universel** (`AndroidSystemPrinterDriver.java`) : si aucun des deux services
+   ci-dessus n'est détecté (tablette Android générique, caisse d'une marque non reconnue, ou
+   simplement TPE dont le service embarqué diffère), l'impression passe par le cadre système
+   standard `android.print.PrintManager` — fonctionne sur n'importe quel appareil Android, mais
+   n'est plus totalement silencieuse (boîte de dialogue système). `FssNativeBridge.doPrint()`
+   bascule aussi automatiquement sur ce secours si le driver fabricant détecté échoue au moment
+   d'imprimer (service installé mais pas encore lié, panne ponctuelle...), pour qu'aucun appareil
+   ne se retrouve totalement sans moyen d'imprimer.
+
+Le `<queries>` d'`AndroidManifest.xml` déclare les deux paquets de service (obligatoire depuis
+Android 11 pour que `PackageManager` puisse seulement les voir).
+
+Le rendu : le ticket HTML (identique à celui de la version bureau) est rendu dans une WebView
+invisible puis converti en image, envoyée telle quelle à l'imprimante (`printer/HtmlToBitmap.java`
+pour Sunmi/Senraise, directement en HTML pour le secours système). Ça évite de reprogrammer toute
+la mise en page en commandes ESC/POS — tout changement visuel fait côté web (dans `index.html`)
+s'applique aussi à l'impression TPE sans rien retoucher côté Android.
 
 ## Compiler
 

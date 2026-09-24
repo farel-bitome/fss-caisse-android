@@ -167,12 +167,20 @@
           // les cas, on va aussi chercher le journal écrit sur disque par main.js : lui ne
           // dépend d'aucun canal de communication, donc il reste fiable même si celui-ci a un
           // problème.
-          call('getStartupLog', {}).then(function (log) {
+          Promise.all([call('getStartupLog', {}), call('getNodeDiagnostics', {})]).then(function (results) {
+            var log = results[0];
+            var diag = results[1] || {};
             var base = window.__fssServerLastError
               ? 'Erreur du serveur embarqué :\n' + window.__fssServerLastError
               : 'Le serveur embarqué ne répond pas après 20s.';
+            var diagText = '--- Diagnostic natif ---\n' +
+              'ABI appareil : ' + JSON.stringify(diag.supportedAbis || []) + '\n' +
+              'Libs natives trouvées (' + (diag.nativeLibraryDir || '?') + ') :\n' +
+              JSON.stringify(diag.nativeLibs || [], null, 0) + '\n' +
+              'Contenu de /files (racine) :\n' + JSON.stringify(diag.topLevelFilesDir || [], null, 0) + '\n' +
+              'main.js trouvé sur le disque :\n' + JSON.stringify(diag.mainJsFound || [], null, 2);
             showStatus(base + '\n\n--- Journal (nodejs-project/main.js) ---\n' +
-              ((log && log.content) || '(vide)'));
+              ((log && log.content) || '(vide)') + '\n\n' + diagText);
           });
         } else {
           hideStatus();

@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Requis à partir d'Android 11 (API 30) : sans cette déclaration, PackageManager ne peut
+         PAS voir si ces services fabricant sont installés (visibilité des paquets restreinte
+         par défaut), même quand ils le sont réellement — la détection "universelle" de
+         l'imprimante dans PrinterDriverFactory dépend entièrement de ces deux lignes. -->
+    <queries>
+        <!-- Service d'impression Sunmi (toutes séries : V1, V2/V2 Pro, V3, T1/T2, P1, D2, S2...) -->
+        <package android:name="woyou.aidlservice.jiuiv5" />
+        <!-- Service d'impression Senraise (H10, H10C, H10S, H10P) -->
+        <package android:name="recieptservice.com.recieptservice" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -9,6 +20,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config"
+        android:extractNativeLibs="true"
         android:theme="@style/AppTheme">
 
         <activity

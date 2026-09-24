@@ -8,6 +8,20 @@ android {
     buildFeatures {
         aidl true
     }
+    // Force l'EXTRACTION physique des bibliothèques natives (libnode.so etc.) sur le disque à
+    // l'installation, plutôt que le chargement direct depuis le .apk compressé (comportement
+    // par défaut d'AGP 8+ sur minSdk 23+). nodejs-mobile-cordova charge son moteur Node via
+    // System.loadLibrary — ça fonctionne dans les deux cas sur un Android "standard", mais
+    // plusieurs ROMs de terminaux de paiement (Sunmi, Senraise et autres caisses/tablettes
+    // Android à firmware modifié) se sont montrées peu fiables avec le chargement direct
+    // depuis l'APK, en particulier sur les gros binaires comme libnode.so. Coordonné avec
+    // android:extractNativeLibs="true" dans AndroidManifest.xml (les deux réglages doivent
+    // matcher, sinon AGP peut retomber sur son propre défaut).
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
     defaultConfig {
         applicationId "com.fss.caisse"
         minSdkVersion rootProject.ext.minSdkVersion

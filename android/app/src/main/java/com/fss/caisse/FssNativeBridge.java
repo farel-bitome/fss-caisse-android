@@ -168,6 +168,17 @@ public class FssNativeBridge {
                 respond(callbackId, r);
                 break;
             }
+            case "getNodeDiagnostics": {
+                // Diagnostic 100% natif (Java), qui ne dépend ni de Node ni du canal
+                // cordova-bridge — utile quand startup.log lui-même n'apparaît jamais, ce qui
+                // signifie que main.js n'a probablement jamais été exécuté DU TOUT. Ça répond à
+                // trois questions : le dossier nodejs-project a-t-il seulement été extrait sur
+                // le disque du TPE ? Contient-il le bon main.js (celui qu'on vient de recompiler,
+                // pas une vieille copie) ? Les bibliothèques natives du moteur Node sont-elles
+                // présentes pour l'ABI de cet appareil ?
+                respond(callbackId, buildNodeDiagnostics());
+                break;
+            }
             case "getCurrentServer": {
                 JSONObject r = new JSONObject();
                 r.put("url", prefs().getString("serverUrl", ""));
@@ -260,10 +271,10 @@ public class FssNativeBridge {
     // Impression : rend le HTML du ticket en bitmap puis l'envoie au driver du fabricant du TPE.
     // ---------------------------------------------------------------------------------------
     private void doPrint(String html, String callbackId) {
-        PrinterDriver driver = PrinterDriverFactory.get(context);
+        final PrinterDriver driver = PrinterDriverFactory.get(context);
         HtmlToBitmap.render(context, html, 384, new HtmlToBitmap.Callback() {
             @Override
-            public void onBitmap(Bitmap bitmap) {
+            public void onBitmap(final Bitmap bitmap) {
                 driver.printBitmap(bitmap, new PrinterDriver.Callback() {
                     @Override
                     public void onSuccess() { respond(callbackId, ok()); }
@@ -271,7 +282,27 @@ public class FssNativeBridge {
                     @Override
                     public void onError(String message) {
                         Log.e(TAG, "Impression échouée (" + driver.getName() + ") : " + message);
-                        respond(callbackId, error(message));
+                        // Le driver du fabricant détecté n'a pas réussi à imprimer (service pas
+                        // encore lié au tout premier essai, panne du service embarqué, etc.) —
+                        // plutôt que de renvoyer directement l'erreur, on retente une seule fois
+                        // via le secours universel (impression système Android), qui fonctionne
+                        // sur n'importe quel appareil. On ne bascule que si ce n'est pas déjà le
+                        // driver universel qui vient d'échouer (sinon boucle infinie).
+                        PrinterDriver universel = PrinterDriverFactory.universalFallback(context);
+                        if (driver == universel) {
+                            respond(callbackId, error(message));
+                            return;
+                        }
+                        Log.w(TAG, "Repli sur l'impression système Android après échec de " + driver.getName());
+                        universel.printBitmap(bitmap, new PrinterDriver.Callback() {
+                            @Override
+                            public void onSuccess() { respond(callbackId, ok()); }
+
+                            @Override
+                            public void onError(String message2) {
+                                respond(callbackId, error(message + " (secours système Android également en échec : " + message2 + ")"));
+                            }
+                        });
                     }
                 });
             }
@@ -395,5 +426,95 @@ public class FssNativeBridge {
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    /**
+     * Diagnostic natif indépendant de Node, pour le cas où startup.log lui-même n'apparaît
+     * jamais (donc main.js n'a peut-être jamais démarré du tout). Répond à trois questions,
+     * chacune avec ce qu'on a réellement trouvé sur le disque de l'appareil, pas une supposition :
+     *   1) Le dossier nodejs-project a-t-il été extrait quelque part sous le stockage privé de
+     *      l'appli (peu importe le chemin exact utilisé par le plugin) ?
+     *   2) Si oui, le main.js qu'on y trouve contient-il bien "Étape 1/5" (preuve que c'est la
+     *      version qu'on vient de recompiler, pas une vieille copie figée) ?
+     *   3) Les bibliothèques natives du moteur Node (libnode / libnodejs-mobile / cdvnodejsmobile)
+     *      sont-elles présentes pour l'ABI réel de cet appareil ?
+     */
+    private JSONObject buildNodeDiagnostics() {
+        JSONObject r = new JSONObject();
+        try {
+            r.put("supportedAbis", new JSONArray(android.os.Build.SUPPORTED_ABIS));
+
+            // 1) Bibliothèques natives réellement installées pour CET appareil.
+            JSONArray nativeLibs = new JSONArray();
+            try {
+                String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+                r.put("nativeLibraryDir", nativeLibDir);
+                File dir = new File(nativeLibDir);
+                File[] files = dir.listFiles();
+                if (files != null) {
+                    for (File f : files) nativeLibs.put(f.getName() + " (" + f.length() + " o)");
+                }
+            } catch (Exception e) {
+                nativeLibs.put("Erreur de lecture : " + e.getMessage());
+            }
+            r.put("nativeLibs", nativeLibs);
+
+            // 2) Recherche de main.js n'importe où sous le stockage privé de l'appli (filesDir),
+            // sans supposer le chemin exact que nodejs-mobile-cordova utilise pour extraire ses
+            // assets — ça évite de rater l'info si le plugin a changé de convention.
+            JSONArray mainJsFound = new JSONArray();
+            JSONArray topLevelFilesDir = new JSONArray();
+            try {
+                File filesDir = context.getFilesDir();
+                File[] top = filesDir.listFiles();
+                if (top != null) {
+                    for (File f : top) {
+                        topLevelFilesDir.put(f.getName() + (f.isDirectory() ? "/" : " (" + f.length() + " o)"));
+                    }
+                }
+                findMainJsRecursive(filesDir, 0, 4, mainJsFound);
+            } catch (Exception e) {
+                mainJsFound.put("Erreur de recherche : " + e.getMessage());
+            }
+            r.put("topLevelFilesDir", topLevelFilesDir);
+            r.put("mainJsFound", mainJsFound);
+        } catch (Exception e) {
+            try { r.put("error", e.getMessage()); } catch (Exception ignored) {}
+        }
+        return r;
+    }
+
+    private void findMainJsRecursive(File dir, int depth, int maxDepth, JSONArray out) {
+        if (depth > maxDepth || out.length() > 10) return;
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        for (File f : children) {
+            if (out.length() > 10) return;
+            if (f.isDirectory()) {
+                findMainJsRecursive(f, depth + 1, maxDepth, out);
+            } else if (f.getName().equals("main.js")) {
+                try {
+                    JSONObject entry = new JSONObject();
+                    entry.put("path", f.getAbsolutePath());
+                    entry.put("size", f.length());
+                    entry.put("lastModified", f.lastModified());
+                    byte[] data = new byte[(int) Math.min(f.length(), 300)];
+                    try (java.io.FileInputStream fis = new java.io.FileInputStream(f)) {
+                        fis.read(data);
+                    }
+                    String preview = new String(data, "UTF-8");
+                    entry.put("preview", preview);
+                    entry.put("estCodeRecent", preview.contains("Étape 1/5") || preview.contains("Etape 1/5"));
+                    out.put(entry);
+                } catch (Exception e) {
+                    try {
+                        JSONObject entry = new JSONObject();
+                        entry.put("path", f.getAbsolutePath());
+                        entry.put("error", e.getMessage());
+                        out.put(entry);
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
     }
 }
