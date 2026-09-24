@@ -4,59 +4,101 @@
 //    jour de l'appli, contrairement à nodejs-project lui-même qui est recopié à chaque install)
 //  - le frontend (./app) et le catalogue par défaut (./server-data) embarqués tels quels
 //
-// Tout est enveloppé de façon défensive : la moindre erreur (y compris un simple require()
-// qui échoue si un fichier ne s'est pas correctement copié dans l'APK) est remontée jusqu'à
-// l'écran du TPE via le canal cordova-bridge, plutôt que de faire échouer silencieusement le
-// thread Node — ce qui, avant, ne laissait qu'un "ne répond pas" générique côté appli.
+// DIAGNOSTIC : ce fichier écrit un journal texte (startup.log) directement sur le disque, à
+// CHAQUE étape, avant même de charger le moindre module tiers (y compris cordova-bridge). Ce
+// journal ne dépend d'aucun canal de communication avec l'appli — donc il reste lisible (via
+// FssNativeBridge.getStartupLog / le bandeau de diagnostic) même si :
+//   - le module natif cordova-bridge ne fonctionne pas ou fait planter le process avant que le
+//     moindre JS ne s'exécute,
+//   - le thread Node s'arrête brutalement (crash natif) sans qu'aucune exception JS ne soit
+//     levée,
+//   - express/socket.io échouent au chargement.
+// Avant cette version, seul cordova.channel.post() remontait les erreurs : si CE canal-là était
+// cassé (ou si le process n'atteignait jamais ce point), on se retrouvait avec un "ne répond
+// pas après 20s" totalement muet sur la vraie cause — exactement ce qui était observé.
 
-// IMPORTANT : contrairement à ce qu'on pourrait croire, "cordova" n'est PAS une variable
-// globale automatiquement disponible dans ce contexte Node.js — c'est un module natif à
-// importer explicitement. C'était le bug qui empêchait tout rapport d'erreur de fonctionner.
+var fs = require('fs');
+var path = require('path');
+
+var DATA_DIR = path.join(__dirname, '..', 'fss-data');
+var LOG_FILE = path.join(DATA_DIR, 'startup.log');
+
+function log(line) {
+  var stamped = '[' + new Date().toISOString() + '] ' + line;
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(LOG_FILE, stamped + '\n');
+  } catch (e) {
+    // Rien de plus à faire si même l'écriture sur disque échoue.
+  }
+  try { console.log('[FSS-CAISSE][startup] ' + line); } catch (e) {}
+}
+
+// Réinitialise le journal à CHAQUE démarrage (plutôt que d'accumuler indéfiniment d'un boot à
+// l'autre), et prouve tout de suite que main.js a bien été atteint et exécuté par le moteur
+// Node embarqué — c'est la toute première chose que ce fichier fait, avant tout require tiers.
+try {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(LOG_FILE,
+    '[' + new Date().toISOString() + '] main.js démarré. __dirname=' + __dirname +
+    ' | node=' + process.version + ' | platform=' + process.platform + '\n');
+} catch (e) {
+  // Si même ça échoue, il n'y a plus rien à journaliser sur disque — le process continue quand
+  // même, au cas où le canal cordova-bridge, lui, fonctionne.
+}
+
+log('Étape 1/5 : fs/path chargés.');
+
 var cordova = null;
 try {
+  // IMPORTANT : contrairement à ce qu'on pourrait croire, "cordova" n'est PAS une variable
+  // globale automatiquement disponible dans ce contexte Node.js — c'est un module natif à
+  // importer explicitement.
   cordova = require('cordova-bridge');
+  log('Étape 2/5 : module cordova-bridge chargé avec succès.');
 } catch (e) {
-  // Si même ça échoue, report() ci-dessous se contentera de ne rien envoyer.
+  log('Étape 2/5 : ÉCHEC du chargement de cordova-bridge : ' + ((e && e.stack) ? e.stack : e));
 }
 
 function report(event, payload) {
+  log('Événement envoyé au canal cordova-bridge : ' + event + ' ' + JSON.stringify(payload));
   try {
     if (cordova && cordova.channel) {
       cordova.channel.post(event, payload);
     }
   } catch (e) {
-    // Rien de plus à faire si même le canal de rapport échoue.
+    log('Échec de l\'envoi sur le canal cordova-bridge : ' + ((e && e.stack) ? e.stack : e));
   }
 }
 
-// Filet de sécurité ultime : toute exception qui n'aurait été rattrapée nulle part ailleurs
-// (erreur asynchrone dans Express/Socket.io, etc.) est quand même signalée avant que le
-// processus ne s'arrête, au lieu de laisser le TPE dans un silence total.
 process.on('uncaughtException', function (err) {
-  report('server-error', { message: '[uncaughtException] ' + (err && err.stack ? err.stack : err) });
+  var msg = '[uncaughtException] ' + (err && err.stack ? err.stack : err);
+  log(msg);
+  report('server-error', { message: msg });
 });
 
 try {
-  const path = require('path');
-  const fs = require('fs');
-  const startEmbeddedServer = require('./embedded-server');
+  log('Étape 3/5 : chargement de embedded-server.js…');
+  var startEmbeddedServer = require('./embedded-server');
+  log('Étape 3/5 : embedded-server.js chargé avec succès.');
 
-  const PORT = 3000;
-  const userDataDir = path.join(__dirname, '..', 'fss-data');
-  if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
+  var PORT = 3000;
+  var userDataDir = DATA_DIR;
+
+  log('Étape 4/5 : appel de startEmbeddedServer(port=' + PORT + ', userDataDir=' + userDataDir + ')…');
 
   startEmbeddedServer(PORT, userDataDir, __dirname)
     .then(function () {
-      console.log('[FSS-CAISSE] Serveur embarqué (mode autonome) démarré sur le port ' + PORT);
+      log('Étape 5/5 : serveur embarqué démarré avec succès sur le port ' + PORT + '.');
       report('server-ready', { port: PORT });
     })
     .catch(function (e) {
-      console.error('[FSS-CAISSE] Échec du démarrage du serveur embarqué :', e && e.message);
-      report('server-error', { message: (e && e.stack) ? e.stack : String(e) });
+      var msg = (e && e.stack) ? e.stack : String(e);
+      log('Étape 5/5 : ÉCHEC du démarrage du serveur embarqué : ' + msg);
+      report('server-error', { message: msg });
     });
 } catch (e) {
-  // Erreur survenue avant même d'atteindre la promesse ci-dessus (ex : un require() qui
-  // échoue parce qu'un module n'a pas été correctement copié dans l'APK/les assets).
-  console.error('[FSS-CAISSE] Erreur fatale au chargement de main.js :', e && e.message);
-  report('server-error', { message: '[chargement] ' + ((e && e.stack) ? e.stack : String(e)) });
+  var msg = '[chargement] ' + ((e && e.stack) ? e.stack : String(e));
+  log(msg);
+  report('server-error', { message: msg });
 }

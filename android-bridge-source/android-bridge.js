@@ -82,13 +82,31 @@
     });
   }
 
+  // Affiche l'état d'avancement en cours d'attente, ET le journal disque écrit par
+  // nodejs-project/main.js (voir sa fonction log()) — ce journal ne dépend d'aucun canal de
+  // communication avec Node, donc il reste consultable même si cordova-bridge est cassé ou si
+  // le process Node n'a jamais atteint le point où il aurait pu poster un événement.
+  function refreshLiveStatus(elapsedSec) {
+    call('getStartupLog', {}).then(function (log) {
+      showStatus('Démarrage du serveur embarqué… (' + elapsedSec + 's)\n\n' +
+        '--- Journal (nodejs-project/main.js) ---\n' + ((log && log.content) || '(vide)'));
+    });
+  }
+
   function waitForServer(maxWaitMs) {
     var start = Date.now();
+    var lastLogRefresh = 0;
     function attempt() {
       return pingServer('http://127.0.0.1:3000/', 1500).then(function (ok) {
         if (ok) return true;
-        if (Date.now() - start > maxWaitMs) return false;
-        showStatus('Démarrage du serveur embarqué… (' + Math.round((Date.now() - start) / 1000) + 's)');
+        var elapsed = Date.now() - start;
+        if (elapsed > maxWaitMs) return false;
+        // Rafraîchit le journal disque toutes les ~2s plutôt qu'à chaque tentative (500ms),
+        // pour ne pas saturer le pont natif avec des lectures de fichier inutiles.
+        if (elapsed - lastLogRefresh >= 2000) {
+          lastLogRefresh = elapsed;
+          refreshLiveStatus(Math.round(elapsed / 1000));
+        }
         return new Promise(function (r) { setTimeout(r, 500); }).then(attempt);
       });
     }
@@ -129,7 +147,10 @@
       window.nodejs.start('main.js', function (err) {
         if (err) {
           window.__fssNodeStarted = false;
-          showStatus('Erreur au démarrage de Node.js :\n' + err);
+          call('getStartupLog', {}).then(function (log) {
+            showStatus('Erreur au démarrage de Node.js :\n' + err +
+              '\n\n--- Journal (nodejs-project/main.js) ---\n' + ((log && log.content) || '(vide)'));
+          });
           resolve(false);
         }
       });
