@@ -6,12 +6,22 @@
 //
 // Tout est enveloppé de façon défensive : la moindre erreur (y compris un simple require()
 // qui échoue si un fichier ne s'est pas correctement copié dans l'APK) est remontée jusqu'à
-// l'écran du TPE via le canal cordova.channel, plutôt que de faire échouer silencieusement le
+// l'écran du TPE via le canal cordova-bridge, plutôt que de faire échouer silencieusement le
 // thread Node — ce qui, avant, ne laissait qu'un "ne répond pas" générique côté appli.
+
+// IMPORTANT : contrairement à ce qu'on pourrait croire, "cordova" n'est PAS une variable
+// globale automatiquement disponible dans ce contexte Node.js — c'est un module natif à
+// importer explicitement. C'était le bug qui empêchait tout rapport d'erreur de fonctionner.
+var cordova = null;
+try {
+  cordova = require('cordova-bridge');
+} catch (e) {
+  // Si même ça échoue, report() ci-dessous se contentera de ne rien envoyer.
+}
 
 function report(event, payload) {
   try {
-    if (typeof cordova !== 'undefined' && cordova.channel) {
+    if (cordova && cordova.channel) {
       cordova.channel.post(event, payload);
     }
   } catch (e) {

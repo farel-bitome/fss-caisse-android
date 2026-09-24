@@ -146,6 +146,28 @@ public class FssNativeBridge {
                 respond(callbackId, ok());
                 break;
             }
+            case "getStartupLog": {
+                // Journal écrit par nodejs-project/main.js, indépendant du canal
+                // cordova.channel — lu directement sur le disque pour rester consultable même
+                // si la communication temps réel avec Node ne fonctionne pas.
+                JSONObject r = new JSONObject();
+                try {
+                    File logFile = new File(context.getFilesDir(), "fss-data/startup.log");
+                    if (logFile.exists()) {
+                        byte[] data = new byte[(int) logFile.length()];
+                        try (java.io.FileInputStream fis = new java.io.FileInputStream(logFile)) {
+                            fis.read(data);
+                        }
+                        r.put("content", new String(data, "UTF-8"));
+                    } else {
+                        r.put("content", "(fichier startup.log introuvable — main.js n'a peut-être jamais été exécuté)");
+                    }
+                } catch (Exception e) {
+                    r.put("content", "Erreur de lecture du journal : " + e.getMessage());
+                }
+                respond(callbackId, r);
+                break;
+            }
             case "getCurrentServer": {
                 JSONObject r = new JSONObject();
                 r.put("url", prefs().getString("serverUrl", ""));

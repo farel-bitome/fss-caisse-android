@@ -142,12 +142,17 @@
       waitForServer(20000).then(function (ok) {
         if (!ok) {
           // Si main.js a signalé une erreur précise entre-temps, elle est déjà affichée par
-          // le listener ci-dessus — on ne l'écrase pas avec le message générique.
-          if (!window.__fssServerLastError) {
-            showStatus('Le serveur embarqué ne répond pas après 20s.\n' +
-              'Vérifie que le TPE a assez d\'espace de stockage libre, puis relance l\'appli.\n' +
-              'Si le problème persiste, ceci est le message à transmettre pour diagnostic.');
-          }
+          // le listener ci-dessus — on ne l'écrase pas avec le message générique. Dans tous
+          // les cas, on va aussi chercher le journal écrit sur disque par main.js : lui ne
+          // dépend d'aucun canal de communication, donc il reste fiable même si celui-ci a un
+          // problème.
+          call('getStartupLog', {}).then(function (log) {
+            var base = window.__fssServerLastError
+              ? 'Erreur du serveur embarqué :\n' + window.__fssServerLastError
+              : 'Le serveur embarqué ne répond pas après 20s.';
+            showStatus(base + '\n\n--- Journal (nodejs-project/main.js) ---\n' +
+              ((log && log.content) || '(vide)'));
+          });
         } else {
           hideStatus();
         }
