@@ -81,7 +81,7 @@ public class HtmlToBitmap {
      *                 l'appli ou son contexte (voir FssNativeBridge.doPrint()).
      */
     public static void render(Context context, String html, int widthPx, @NonNull Callback callback) {
-        Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
         main.post(() -> {
             Activity activity = findActivity(context);
             if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
