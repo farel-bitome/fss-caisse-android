@@ -129,14 +129,28 @@ jobs:
         # --stacktrace, Gradle imprime la trace COMPLÈTE (souvent 200+ lignes de classes internes
         # org.gradle.internal.*, sans aucun rapport avec la vraie cause) juste après le message
         # utile — les 250 dernières lignes ne contenaient donc plus que cette trace interne, sans
-        # jamais remonter jusqu'à "* What went wrong:" ni "Caused by:". On cherche maintenant ce
-        # marqueur explicitement et on affiche TOUT à partir de lui (description du problème +
-        # cause exacte, la trace interne peut suivre mais au moins le message utile est présent).
+        # jamais remonter jusqu'à "* What went wrong:" ni "Caused by:".
+        #
+        # PIÈGE DÉCOUVERT ICI (celui qui a fait perdre du temps sur plusieurs allers-retours) :
+        # pour une tâche comme :app:compileDebugJavaWithJavac, la VRAIE cause (les lignes
+        # "MonFichier.java:123: error: ...") n'est PAS dans la section "* What went wrong:" —
+        # cette section ne donne qu'un message générique ("Compilation failed; see the compiler
+        # error output for details."). La sortie réelle du compilateur javac est imprimée PLUS
+        # TÔT dans le log, comme sortie standard de la tâche elle-même, AVANT le rapport final
+        # "FAILURE: Build failed...". On affiche donc maintenant D'ABORD ce bloc-là (recherché via
+        # le marqueur ": error:" propre à javac), puis en complément la section "What went wrong".
         if: always()
         run: |
           if [ -s /tmp/gradle-debug.log ] && grep -q "BUILD FAILED" /tmp/gradle-debug.log; then
             echo "===== BUILD FAILED ====="
+            if grep -q ": error:" /tmp/gradle-debug.log; then
+              echo "----- Erreur(s) du compilateur javac -----"
+              grep -n -B2 -A5 ": error:" /tmp/gradle-debug.log | head -300
+              echo "----- fin des erreurs javac -----"
+              echo ""
+            fi
             if grep -q "What went wrong" /tmp/gradle-debug.log; then
+              echo "----- Rapport Gradle (What went wrong) -----"
               awk '/What went wrong/{found=1} found' /tmp/gradle-debug.log | head -300
             else
               echo "(marqueur \"What went wrong\" introuvable — 250 dernières lignes en secours)"
