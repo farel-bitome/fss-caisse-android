@@ -217,6 +217,34 @@ Si un souci de démarrage du mode autonome revient malgré ces correctifs, ce no
 dira précisément à quelle étape ça bloque, ce qui rendra le diagnostic immédiat au lieu de devoir
 à nouveau remonter toute la chaîne d'appels.
 
+## Deuxième panne résolue : "Cannot find module .../engine.io/build/engine.io.js"
+
+Une fois la panne ci-dessus corrigée, Node démarrait enfin — mais `main.js` échouait aussitôt avec
+une erreur Node authentique (remontée immédiatement via le canal `server-error`, donc **avant**
+le timeout de 20s) : `Cannot find module '.../node_modules/engine.io/build/engine.io.js'`, alors
+que ce fichier existe bel et bien sur le disque du TPE (extraction vérifiée réussie).
+
+**Cause racine identifiée avec certitude** : `nodejs-mobile-cordova@0.4.3` embarque **Node.js
+12.19.0** (vérifié directement dans le binaire natif du plugin :
+`node_modules/nodejs-mobile-cordova/libs/android/libnode/include/node/node_version.h`). C'est un
+Node ancien (fin 2020) dont la prise en charge du champ `"exports"` du `package.json`
+(résolution conditionnelle de modules) est connue pour être incomplète sur les formes utilisées
+par les dépendances modernes. `socket.io@4.7.5` → `engine.io@6.6.x` (et plusieurs de leurs propres
+dépendances) déclarent un `"exports"` conditionnel (`"require"`/`"import"`/`"types"`) en plus de
+`"main"` — les deux pointant vers exactement le même fichier — mais Node 12.19 échoue à résoudre
+cette forme et rapporte le fichier introuvable, alors qu'une résolution classique via `"main"`
+(seule, sans `"exports"`) fonctionne parfaitement sur ce même Node 12.19.
+
+**Correction** : `scripts/fix-nodejs-project-node12-exports.js` supprime le champ `"exports"` de
+chaque `package.json` de `nodejs-project/node_modules`, **uniquement** quand sa cible de
+résolution `require`/`default` est identique à `"main"` (donc sans changer le fichier réellement
+chargé — juste en évitant l'algorithme de résolution `"exports"` bogué sur ce Node précis). Déjà
+appliqué aux dépendances actuellement commitées (18 paquets concernés : `engine.io`, `socket.io`,
+`ws`, `engine.io-parser`, `socket.io-parser`, et leurs dépendances transitives comme
+`side-channel*`/`get-intrinsic`/`call-bound`...). **À relancer après toute mise à jour des
+dépendances de `nodejs-project`** (son `node_modules` est commité tel quel dans le dépôt et
+embarqué directement dans l'APK — il n'y a pas de `npm install` pour lui en CI).
+
 ## Limites connues / à trancher
 
 - **`openBackupFileDialog`** (restauration manuelle d'une sauvegarde) : pas de sélecteur de
