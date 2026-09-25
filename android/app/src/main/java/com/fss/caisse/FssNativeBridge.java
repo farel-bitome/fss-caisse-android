@@ -325,10 +325,26 @@ public class FssNativeBridge {
     // ---------------------------------------------------------------------------------------
     private void doPrint(String html, int widthPx, String callbackId) {
         final PrinterDriver driver = PrinterDriverFactory.get(context);
-        HtmlToBitmap.render(activity, html, widthPx, new HtmlToBitmap.Callback() {
+        // Certains TPE (Senraise H10S/H10P) n'ont qu'un module thermique 58mm : un ticket généré
+        // par défaut en 80mm (les bons de commande cuisine, les tickets de prélèvement et le bilan
+        // de clôture ne proposent pas de choix de format côté JS, contrairement au reçu client et
+        // à l'addition) ne sortirait alors jamais — voir PrinterDriver.getMaxWidthPx(). On réduit
+        // donc la largeur ICI, avant même de générer le bitmap, quel que soit le format demandé.
+        int maxWidthPx = driver.getMaxWidthPx();
+        final int effectiveWidthPx = (maxWidthPx > 0 && widthPx > maxWidthPx) ? maxWidthPx : widthPx;
+        if (effectiveWidthPx != widthPx) {
+            Log.w(TAG, "Largeur d'impression réduite de " + widthPx + "px à " + effectiveWidthPx
+                    + "px (limite physique de " + driver.getName() + ").");
+        }
+        HtmlToBitmap.render(activity, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
             @Override
             public void onBitmap(final Bitmap bitmap) {
-                driver.printBitmap(bitmap, new PrinterDriver.Callback() {
+                // HtmlToBitmap.render() termine sur le thread UI (nécessaire pour dessiner la
+                // WebView de rendu). Certains drivers (Senraise/H10S) enchaînent plusieurs appels
+                // AIDL SYNCHRONES (une par tranche de bitmap découpée, voir H10sPrinterDriver) —
+                // les exécuter directement ici bloquerait le thread UI et risquerait un ANR sur un
+                // ticket long. On repasse donc sur le thread de fond avant d'appeler le driver.
+                bg.execute(() -> driver.printBitmap(bitmap, new PrinterDriver.Callback() {
                     @Override
                     public void onSuccess() { respond(callbackId, ok()); }
 
@@ -347,7 +363,7 @@ public class FssNativeBridge {
                             return;
                         }
                         Log.w(TAG, "Repli sur l'impression système Android après échec de " + driver.getName());
-                        universel.printBitmap(bitmap, new PrinterDriver.Callback() {
+                        bg.execute(() -> universel.printBitmap(bitmap, new PrinterDriver.Callback() {
                             @Override
                             public void onSuccess() { respond(callbackId, ok()); }
 
@@ -355,9 +371,9 @@ public class FssNativeBridge {
                             public void onError(String message2) {
                                 respond(callbackId, error(message + " (secours système Android également en échec : " + message2 + ")"));
                             }
-                        });
+                        }));
                     }
-                });
+                }));
             }
 
             @Override

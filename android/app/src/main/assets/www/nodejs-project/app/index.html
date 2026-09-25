@@ -782,11 +782,19 @@ td{padding:8px 11px;vertical-align:middle}
                 <option value="network">Réseau (IP)</option>
               </select>
             </div>
-            <div class="fg"><label class="fl">Format papier par défaut</label>
+            <div class="fg"><label class="fl">Format papier par défaut (test manuel)</label>
               <select class="fi" id="devPrintFmt" onchange="saveDevSettings()">
                 <option value="80mm">Thermique 80mm</option>
+                <option value="58mm">Thermique 58mm</option>
                 <option value="A4">A4</option>
               </select>
+            </div>
+            <div class="fg"><label class="fl">Format papier de CE TPE (bons de commande, prélèvements, clôture)</label>
+              <select class="fi" id="devFormatAutoTpe" onchange="saveFormatAutoTpe()">
+                <option value="80mm">Thermique 80mm</option>
+                <option value="58mm">Thermique 58mm</option>
+              </select>
+              <div style="font-size:11px;color:#888;margin-top:4px">Réglez ceci une seule fois selon l'imprimante réelle de cet appareil : les tickets imprimés automatiquement (sans écran de choix) utiliseront toujours ce format sur ce TPE.</div>
             </div>
             <div class="fg" id="devPrintIPWrap" style="display:none"><label class="fl">Adresse IP imprimante</label><input class="fi" id="devPrintIP" placeholder="192.168.1.50" onchange="saveDevSettings()"></div>
             <div class="fg"><label class="fl">Impression automatique</label>
@@ -1407,6 +1415,7 @@ window.__fssHandleBack=function(){
 // aucun moyen de savoir lequel est réellement utilisé — d'où ce bandeau qui remplace le menu par
 // l'info réelle quand on tourne sur le pont natif Android.
 function rafraichirInfoImprimanteTpe(){
+  if(g('devFormatAutoTpe'))g('devFormatAutoTpe').value=formatPapierTpe();
   if(!(window.electronAPI&&window.electronAPI.getPrinterInfo))return; // Version bureau : le menu reste pertinent tel quel.
   g('devPrintTypeWrap').style.display='none';
   var info=g('devPrintTpeInfo');
@@ -1695,10 +1704,11 @@ var printBatches=[];
 var clotureHistorique=[];
 var resumingAttenteId=null,resumingBaseItems=null,resumingSentQty=null;
 function imprimerTicketAttente(batch){
+  var fmt=formatPapierTpe();
   var etab=g('etabNom')?g('etabNom').value:'FSS-CAISSE';
-  var css='@page{size:80mm auto;margin:0}'+
+  var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
-    'html,body{width:80mm}'+
+    'html,body{width:'+fmt+'}'+
     'body{font-family:"Courier New",monospace;font-size:13px;font-weight:900;padding:3mm 4mm}'+
     'table{width:100%;border-collapse:collapse;margin:2px 0}'+
     'td{padding:2px 0;vertical-align:top}'+
@@ -1729,7 +1739,7 @@ function imprimerTicketAttente(batch){
   // Impression automatique (déclenchée par la synchro réseau, voir network.js) — un échec
   // silencieux ici est le pire cas (le bon de commande cuisine ne sort jamais et personne ne le
   // sait), donc on le signale quand même par un toast au lieu de l'ignorer.
-  Promise.resolve(imprimerSilencieux(html)).then(function(r){
+  Promise.resolve(imprimerSilencieux(html,fmt)).then(function(r){
     if(r&&r.success===false){
       toast('❌ Échec impression bon de commande : '+(r.error||'erreur inconnue'),'e');
     }
@@ -2011,6 +2021,22 @@ function renderAttenteBar(){
   });
 }
 // ---- PÉRIPHÉRIQUES ----
+// Format papier réglé UNE FOIS par TPE (58mm ou 80mm), utilisé par toutes les impressions
+// AUTOMATIQUES (bon de commande cuisine/bar, ticket de prélèvement, bilan de clôture) qui ne
+// proposent pas d'écran de choix — contrairement au reçu client et à l'addition, dont l'écran de
+// validation laisse choisir le format à chaque impression. Stocké en local (localStorage) car
+// c'est une caractéristique physique de CET appareil précis, pas une donnée à synchroniser entre
+// postes.
+function formatPapierTpe(){
+  try{
+    return (localStorage.getItem('fss-format-papier-tpe')==='58mm')?'58mm':'80mm';
+  }catch(e){return '80mm';}
+}
+function saveFormatAutoTpe(){
+  var v=(g('devFormatAutoTpe')&&g('devFormatAutoTpe').value==='58mm')?'58mm':'80mm';
+  try{localStorage.setItem('fss-format-papier-tpe',v);}catch(e){}
+  toast('Format papier de ce TPE enregistré ('+v+')','s');
+}
 function saveDevSettings(){
   var type=g('devPrintType').value;
   g('devPrintIPWrap').style.display=(type==='network')?'':'none';
@@ -3390,9 +3416,11 @@ function addPrel(){
   toast(fmt(mnt)+' prélevé','s');
   imprimerPrelevement(mnt,motif,heure,solde-mnt);
 }
-// Petit ticket 80mm imprimé automatiquement à chaque prélèvement, pour garder
-// une trace papier immédiate (montant, motif, heure, caissier, nouveau solde).
+// Petit ticket imprimé automatiquement à chaque prélèvement, pour garder une trace papier
+// immédiate (montant, motif, heure, caissier, nouveau solde). Format papier : celui réglé une
+// fois pour toutes sur CE TPE (voir formatPapierTpe), pas de choix à chaque prélèvement.
 function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
+  var fmt=formatPapierTpe();
   var etab=g('etabNom')?g('etabNom').value:'FSS-CAISSE';
   var caissier=(window.currentUser&&window.currentUser.nom)?window.currentUser.nom:'—';
   var cxLbl=(g('cloCaisse')&&g('cloCaisse').value)||'Toutes les caisses';
@@ -3413,9 +3441,9 @@ function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
   var articlesTries=Object.keys(parArticle).map(function(cle){
     return {nom:parArticle[cle].nom,qty:parArticle[cle].qty,total:parArticle[cle].total};
   }).sort(function(a,b){return b.qty-a.qty;});
-  var css='@page{size:80mm auto;margin:0}'+
+  var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
-    'html,body{width:80mm}'+
+    'html,body{width:'+fmt+'}'+
     'body{font-family:"Courier New",monospace;font-size:11px;font-weight:700;padding:2mm 3mm}'+
     'table{width:100%;border-collapse:collapse;margin:1px 0;table-layout:fixed}'+
     'td{padding:1px 0;overflow-wrap:break-word;word-break:break-word}'+
@@ -3451,11 +3479,25 @@ function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
   html+='<div class="sep"></div>';
   html+='<div class="c" style="font-size:11px">Édité le '+new Date().toLocaleString('fr-FR')+'</div>';
   html+='</body></html>';
-  var w=window.open('','_blank','width=380,height=600');
-  w.document.write(html);w.document.close();
-  w.onafterprint=function(){w.close();};
-  setTimeout(function(){w.print();},400);
-  setTimeout(function(){if(!w.closed)w.close();},15000);
+  // Comme pour le bon de commande et le bilan de clôture : impression silencieuse native quand
+  // disponible (Android). L'ancienne méthode (fenêtre popup + window.print()) ne déclenche AUCUNE
+  // impression sur un TPE Android — c'est resté silencieusement cassé jusqu'ici — donc on ne
+  // garde le popup qu'en secours pour la version bureau sans pont natif.
+  if(window.electronAPI&&window.electronAPI.printSilent){
+    Promise.resolve(imprimerSilencieux(html,fmt)).then(function(r){
+      if(r&&r.success===false){
+        toast('❌ Échec impression ticket de prélèvement : '+(r.error||'erreur inconnue'),'e');
+      }
+    }).catch(function(e){
+      toast('❌ Échec impression ticket de prélèvement : '+(e&&e.message?e.message:e),'e');
+    });
+  }else{
+    var w=window.open('','_blank','width=380,height=600');
+    w.document.write(html);w.document.close();
+    w.onafterprint=function(){w.close();};
+    setTimeout(function(){w.print();},400);
+    setTimeout(function(){if(!w.closed)w.close();},15000);
+  }
 }
 function renderPrls(){var w=g('prelList');if(!w)return;var tot=prls.reduce(function(s,p){return s+p.mnt;},0);if(!prls.length){w.innerHTML='<span style="color:#444">Aucun prélèvement</span>';}else{w.innerHTML='';prls.forEach(function(p){var d=document.createElement('div');d.style.cssText='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #222;font-size:12px';d.innerHTML='<span>'+p.heure+' — '+p.motif+'</span><span style="color:#FF4444;font-weight:700">'+fmt(p.mnt)+'</span>';w.appendChild(d);});}g('clPrel').textContent=fmt(tot);}
 function doCloture(){
@@ -3580,7 +3622,8 @@ function calcCpt(){var tot=(parseInt(g('b10').value)||0)*10000+(parseInt(g('b5')
 // Construit le HTML du bilan de clôture à partir d'un instantané de données
 // (pas d'accès au DOM ici) — réutilisé à la fois pour l'impression locale et
 // pour l'impression automatique routée vers le poste Serveur.
-function buildBilanClotureHTML(snapshot){
+function buildBilanClotureHTML(snapshot,fmt){
+  fmt=(fmt==='58mm')?'58mm':(fmt==='80mm'?'80mm':formatPapierTpe());
   var tl=snapshot.tl,cxLbl=snapshot.cxLbl,ttc=snapshot.ttc,tp=snapshot.tp,now=snapshot.now;
 
   var parArticle={};
@@ -3600,9 +3643,9 @@ function buildBilanClotureHTML(snapshot){
     return {nom:parArticle[cle].nom,qty:parArticle[cle].qty,total:parArticle[cle].total};
   }).sort(function(a,b){return b.qty-a.qty;});
 
-  var css='@page{size:80mm auto;margin:0}'+
+  var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
-    'html,body{width:80mm}'+
+    'html,body{width:'+fmt+'}'+
     'body{font-family:"Courier New",monospace;font-size:9px;font-weight:700;padding:2mm 3mm}'+
     'h2{text-align:center;font-size:12px;font-weight:900}'+
     '.sep{border-top:1px dashed #000;margin:4px 0}'+
@@ -3653,7 +3696,8 @@ function buildBilanClotureHTML(snapshot){
 // Impression locale directe (utilisée par le bouton "80mm" manuel)
 function print80(){
   var snapshot=construireInstantaneCloture();
-  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot));
+  var fmt=formatPapierTpe();
+  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot,fmt),fmt);
 }
 function construireInstantaneCloture(){
   var tl=txsCloture();
@@ -3666,14 +3710,16 @@ function construireInstantaneCloture(){
     origine:(window.currentUser&&window.currentUser.nom?window.currentUser.nom+' — ':'')+(window.FSS_IS_SERVER?'Poste Serveur':'Poste distant (client/mobile)')
   };
 }
-function ouvrirEtImprimerHTML(html){
+function ouvrirEtImprimerHTML(html,fmt){
   // Utilise le même mécanisme fiable que le bon de commande cuisine
   // (impression silencieuse native via Electron). L'ancienne méthode
   // (fenêtre popup + window.print()) échouait silencieusement quand elle était
   // déclenchée automatiquement (ex. depuis un événement réseau suite à une
   // clôture lancée par un téléphone/poste distant), car ce n'est pas une
   // action directement initiée par un clic de l'utilisateur sur CE poste.
-  Promise.resolve(imprimerSilencieux(html)).then(function(r){
+  // fmt : format papier ('58mm'/'80mm') de CE poste précis (voir formatPapierTpe) — utilisé par
+  // défaut quand l'appelant n'en précise pas.
+  Promise.resolve(imprimerSilencieux(html,fmt||formatPapierTpe())).then(function(r){
     if(r&&r.success===false){
       toast('❌ Échec impression bilan de clôture : '+(r.error||'erreur inconnue'),'e');
     }
@@ -3684,9 +3730,11 @@ function ouvrirEtImprimerHTML(html){
 // Appelée uniquement côté Serveur (voir network.js) quand une clôture a été
 // déclenchée depuis un autre poste (téléphone, poste client) — garantit que le
 // ticket sort bien sur l'imprimante physique du serveur, peu importe l'appareil
-// qui a validé la clôture.
+// qui a validé la clôture. Le format utilisé est celui réglé sur CE poste serveur
+// (formatPapierTpe), pas celui de l'appareil qui a déclenché la clôture à distance.
 function imprimerBilanClotureAuto(snapshot){
-  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot));
+  var fmt=formatPapierTpe();
+  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot,fmt),fmt);
 }
 function printA4(){var tl=txsCloture(),cxLbl=(g('cloCaisse')&&g('cloCaisse').value)||'Toutes les caisses',ttc=tl.reduce(function(s,t){return s+t.ttc;},0),tp=prls.reduce(function(s,p){return s+p.mnt;},0),w=window.open('','_blank'),now=new Date().toLocaleString('fr-FR');w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:11px;padding:20mm}h1{font-size:22px;color:#CC0000}h2{font-size:14px;margin:14px 0 6px}table{width:100%;border-collapse:collapse;margin-bottom:12px}th{background:#CC0000;color:#fff;padding:7px 10px;text-align:left}td{padding:6px 10px;border-bottom:1px solid #eee}tr:nth-child(even) td{background:#f9f9f9}.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}.kc{border:1px solid #ddd;border-radius:6px;padding:10px 14px}.kl{font-size:10px;color:#666;text-transform:uppercase}.kv{font-size:20px;font-weight:700;color:#CC0000}.sep{border-top:2px solid #CC0000;margin:14px 0}.footer{text-align:center;font-size:10px;color:#666;margin-top:20px}</style></head><body>');w.document.write('<h1>FSS-CAISSE</h1><div style="font-size:12px;color:#666">RAPPORT DE CLÔTURE — '+cxLbl+' — '+now+'</div><div class="sep"></div><div class="kpi"><div class="kc"><div class="kl">Tickets</div><div class="kv" style="color:#1144CC">'+tl.length+'</div></div><div class="kc"><div class="kl">Total</div><div class="kv">'+ttc.toLocaleString('fr-FR')+' F</div></div><div class="kc"><div class="kl">Solde</div><div class="kv" style="color:#1144CC">'+(ttc-tp).toLocaleString('fr-FR')+' F</div></div></div><h2>Transactions</h2><table><thead><tr><th>N° Ticket</th><th>Date</th><th>Table</th><th>Caisse</th><th>Montant</th><th>Paiement</th></tr></thead><tbody>');tl.forEach(function(t){w.document.write('<tr><td>'+t.id+'</td><td>'+t.date+'</td><td>'+t.tbl+'</td><td>'+(t.caisse||'—')+'</td><td><strong>'+t.ttc.toLocaleString('fr-FR')+'</strong></td><td>'+t.pay+'</td></tr>');});w.document.write('</tbody></table><div class="footer">FSS-CAISSE — '+now+'</div></body></html>');w.document.close();w.onafterprint=function(){w.close();};setTimeout(function(){w.print();},400);setTimeout(function(){if(!w.closed)w.close();},15000);}
 

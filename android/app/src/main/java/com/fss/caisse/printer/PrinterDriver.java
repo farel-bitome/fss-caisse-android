@@ -30,6 +30,20 @@ public interface PrinterDriver {
     boolean isAvailable();
 
     /**
+     * Largeur d'impression MAXIMALE (en pixels, 203dpi) que le module thermique de cet appareil
+     * peut physiquement gérer, ou 0 si l'appareil accepte plusieurs formats (58mm ET 80mm — ex :
+     * Sunmi V2 Pro) et qu'il n'y a donc rien à limiter.
+     *
+     * Certains TPE n'ont qu'un module 58mm intégré (ex : Senraise H10S/H10P — 384px). Envoyer à
+     * leur service AIDL un bitmap plus large (ex : 576px pour du 80mm, utilisé par défaut pour les
+     * bons de commande cuisine et les tickets automatiques) fait échouer l'impression — souvent
+     * SILENCIEUSEMENT (rien ne sort, aucune erreur claire) plutôt qu'avec un message explicite.
+     * FssNativeBridge utilise cette valeur pour réduire automatiquement la largeur demandée avant
+     * même de générer le bitmap, quel que soit le format choisi côté JS.
+     */
+    default int getMaxWidthPx() { return 0; }
+
+    /**
      * Imprime le bitmap fourni (rendu du ticket HTML) puis avance le papier.
      * Doit être appelé depuis un thread de fond — jamais le thread UI.
      */

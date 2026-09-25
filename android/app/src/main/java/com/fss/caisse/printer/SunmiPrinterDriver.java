@@ -73,21 +73,51 @@ public class SunmiPrinterDriver implements PrinterDriver {
         return bound && service != null;
     }
 
+    // Limite de sécurité pour chaque tranche envoyée via AIDL/Binder : Android limite la taille
+    // totale d'une transaction Binder à environ 1 Mo (souvent moins en pratique une fois les
+    // frais du framework comptés). Un ticket un peu long en ARGB_8888 (ex: 384x1500px = ~2,3 Mo)
+    // dépasse largement cette limite, ce qui peut faire échouer l'appel SILENCIEUSEMENT sur
+    // certains firmwares (le ticket sort blanc ou tronqué au lieu de renvoyer une vraie erreur).
+    // On découpe donc le bitmap en tranches horizontales avant l'envoi, comme le font toutes les
+    // applications de caisse sérieuses avec ce type de SDK.
+    private static final int MAX_SLICE_BYTES = 256 * 1024;
+
     @Override
     public void printBitmap(Bitmap bitmap, final Callback callback) {
         if (!isAvailable()) {
             callback.onError("Service imprimante Sunmi non disponible (non lié ou appareil non Sunmi).");
             return;
         }
+        int width = Math.max(1, bitmap.getWidth());
+        int bytesPerRow = width * 4; // ARGB_8888
+        int sliceHeight = Math.max(1, MAX_SLICE_BYTES / bytesPerRow);
+        printSliceFrom(bitmap, 0, sliceHeight, callback);
+    }
+
+    private void printSliceFrom(final Bitmap bitmap, final int y, final int sliceHeight, final Callback callback) {
+        int totalHeight = bitmap.getHeight();
+        if (y >= totalHeight) {
+            try {
+                service.lineWrap(4, null);
+            } catch (RemoteException ignored) {}
+            callback.onSuccess();
+            return;
+        }
+        int height = Math.min(sliceHeight, totalHeight - y);
+        final Bitmap slice;
         try {
-            service.printBitmap(bitmap, new ICallback.Stub() {
+            slice = Bitmap.createBitmap(bitmap, 0, y, bitmap.getWidth(), height);
+        } catch (Exception e) {
+            callback.onError("Erreur de découpage du ticket avant impression : " + e.getMessage());
+            return;
+        }
+        try {
+            service.printBitmap(slice, new ICallback.Stub() {
                 @Override
                 public void onRunResult(boolean isSuccess) throws RemoteException {
+                    try { slice.recycle(); } catch (Exception ignored) {}
                     if (isSuccess) {
-                        try {
-                            service.lineWrap(4, null);
-                        } catch (RemoteException ignored) {}
-                        callback.onSuccess();
+                        printSliceFrom(bitmap, y + height, sliceHeight, callback);
                     } else {
                         callback.onError("L'imprimante Sunmi a signalé un échec (papier absent ?).");
                     }
@@ -100,6 +130,7 @@ public class SunmiPrinterDriver implements PrinterDriver {
 
                 @Override
                 public void onRaiseException(int code, String msg) throws RemoteException {
+                    try { slice.recycle(); } catch (Exception ignored) {}
                     callback.onError("Erreur imprimante Sunmi (" + code + ") : " + msg);
                 }
 
@@ -109,6 +140,7 @@ public class SunmiPrinterDriver implements PrinterDriver {
                 }
             });
         } catch (RemoteException e) {
+            try { slice.recycle(); } catch (Exception ignored) {}
             callback.onError("Erreur de communication avec le service imprimante Sunmi : " + e.getMessage());
         }
     }

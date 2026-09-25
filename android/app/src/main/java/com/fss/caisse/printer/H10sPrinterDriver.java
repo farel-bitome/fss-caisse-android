@@ -81,15 +81,42 @@ public class H10sPrinterDriver implements PrinterDriver {
     }
 
     @Override
+    public int getMaxWidthPx() {
+        // Le H10S/H10P n'a qu'un module thermique 58mm intégré (384px à 203dpi) — voir le
+        // commentaire de classe et celui de l'interface PrinterDriver.getMaxWidthPx(). Un bon de
+        // commande ou un ticket automatique, générés par défaut en 80mm (576px), doivent donc être
+        // réduits AVANT le rendu, sinon rien ne sort de l'imprimante sur ce modèle.
+        return 384;
+    }
+
+    // Voir le commentaire équivalent dans SunmiPrinterDriver : au-delà d'environ 1 Mo, une
+    // transaction Binder/AIDL peut échouer silencieusement selon le firmware — un ticket un peu
+    // long en ARGB_8888 dépasse vite ce seuil. Le service Senraise n'ayant pas de callback
+    // asynchrone par appel (contrairement à Sunmi), on découpe simplement en boucle synchrone.
+    private static final int MAX_SLICE_BYTES = 256 * 1024;
+
+    @Override
     public void printBitmap(Bitmap bitmap, final Callback callback) {
         if (!isAvailable()) {
             callback.onError("Service imprimante Senraise non disponible (non lié ou appareil non Senraise H10).");
             return;
         }
+        int width = Math.max(1, bitmap.getWidth());
+        int bytesPerRow = width * 4; // ARGB_8888
+        int sliceHeight = Math.max(1, MAX_SLICE_BYTES / bytesPerRow);
+        int totalHeight = bitmap.getHeight();
         try {
             // Alignement centré (1), comme pour Sunmi — cohérent avec le rendu HTML déjà centré.
             service.setAlignment(1);
-            service.printBitmap(bitmap);
+            for (int y = 0; y < totalHeight; y += sliceHeight) {
+                int height = Math.min(sliceHeight, totalHeight - y);
+                Bitmap slice = Bitmap.createBitmap(bitmap, 0, y, bitmap.getWidth(), height);
+                try {
+                    service.printBitmap(slice);
+                } finally {
+                    slice.recycle();
+                }
+            }
             service.nextLine(4);
             callback.onSuccess();
         } catch (RemoteException e) {
