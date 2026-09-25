@@ -45,11 +45,18 @@ public class PrinterDriverFactory {
 
     public static synchronized PrinterDriver get(Context context) {
         if (instance == null) {
-            if (isServiceInstalled(context, SUNMI_PACKAGE, SUNMI_ACTION)) {
-                Log.i(TAG, "Service imprimante Sunmi détecté (" + Build.MANUFACTURER + "/" + Build.MODEL + ") — driver Sunmi sélectionné.");
+            // Détection primaire : le service réellement installé (voir le commentaire de classe).
+            // Complétée par le nom du fabricant/modèle (même logique que FSS-CALCUL) comme SIGNAL
+            // SUPPLÉMENTAIRE dans les logs et pour choisir en priorité SUNMI si les deux signaux se
+            // contredisent — utile sur un appareil où le service est présent mais pas encore
+            // interrogeable (juste après un flash/reset d'usine, par exemple).
+            boolean sunmiParFabricant = isSunmiParFabricant();
+            boolean senraiseParFabricant = isSenraiseParFabricant();
+            if (isServiceInstalled(context, SUNMI_PACKAGE, SUNMI_ACTION) || sunmiParFabricant) {
+                Log.i(TAG, "Imprimante Sunmi détectée (" + Build.MANUFACTURER + "/" + Build.BRAND + "/" + Build.MODEL + ") — driver Sunmi sélectionné.");
                 instance = new SunmiPrinterDriver(context);
-            } else if (isServiceInstalled(context, SENRAISE_PACKAGE, null)) {
-                Log.i(TAG, "Service imprimante Senraise détecté (" + Build.MANUFACTURER + "/" + Build.MODEL + ") — driver Senraise sélectionné.");
+            } else if (isServiceInstalled(context, SENRAISE_PACKAGE, null) || senraiseParFabricant) {
+                Log.i(TAG, "Imprimante Senraise détectée (" + Build.MANUFACTURER + "/" + Build.BRAND + "/" + Build.MODEL + ") — driver Senraise sélectionné.");
                 instance = new H10sPrinterDriver(context);
             } else {
                 Log.i(TAG, "Aucun service imprimante fabricant reconnu sur " + Build.MANUFACTURER + "/" + Build.MODEL
@@ -58,6 +65,18 @@ public class PrinterDriverFactory {
             }
         }
         return instance;
+    }
+
+    /** Même logique de détection par fabricant que FSS-CALCUL (Build.MANUFACTURER/BRAND). */
+    private static boolean isSunmiParFabricant() {
+        return Build.MANUFACTURER.toUpperCase().contains("SUNMI") || Build.BRAND.toUpperCase().contains("SUNMI");
+    }
+
+    /** Même logique de détection par fabricant/modèle que FSS-CALCUL : H10, H10C, H10S, H10P. */
+    private static boolean isSenraiseParFabricant() {
+        return Build.MANUFACTURER.toUpperCase().contains("SENRAISE")
+                || Build.BRAND.toUpperCase().contains("SENRAISE")
+                || Build.MODEL.toUpperCase().startsWith("H10");
     }
 
     /** Le secours universel, toujours disponible, y compris quand un autre driver a été choisi ci-dessus. */

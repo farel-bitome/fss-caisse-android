@@ -769,42 +769,11 @@ td{padding:8px 11px;vertical-align:middle}
     <div class="sub" id="sub-params-dev">
       <div class="slay">
         <div class="ssect"><div class="ssti">🖨️ Imprimante</div>
-          <div style="font-size:12px;color:#888;margin-bottom:14px">Configurez l'imprimante de tickets utilisée pour les reçus.</div>
+          <div style="font-size:12px;color:#888;margin-bottom:14px">Le type d'imprimante et le format papier sont détectés automatiquement sur ce TPE — aucun réglage à faire.</div>
           <div id="devPrintTpeInfo" style="display:none;font-size:12px;background:#111;border:1px solid #333;border-radius:6px;padding:10px 12px;margin-bottom:14px">
             Pilote imprimante détecté sur ce TPE : <strong id="devPrintTpeNom">…</strong>
           </div>
-          <div class="sg">
-            <div class="fg" id="devPrintTypeWrap"><label class="fl">Type d'imprimante</label>
-              <select class="fi" id="devPrintType" onchange="saveDevSettings()">
-                <option value="none">Aucune (impression navigateur)</option>
-                <option value="usb">USB / Pilote Windows</option>
-                <option value="bt">Bluetooth (thermique 80mm)</option>
-                <option value="network">Réseau (IP)</option>
-              </select>
-            </div>
-            <div class="fg"><label class="fl">Format papier par défaut (test manuel)</label>
-              <select class="fi" id="devPrintFmt" onchange="saveDevSettings()">
-                <option value="80mm">Thermique 80mm</option>
-                <option value="58mm">Thermique 58mm</option>
-                <option value="A4">A4</option>
-              </select>
-            </div>
-            <div class="fg"><label class="fl">Format papier de CE TPE (bons de commande, prélèvements, clôture)</label>
-              <select class="fi" id="devFormatAutoTpe" onchange="saveFormatAutoTpe()">
-                <option value="80mm">Thermique 80mm</option>
-                <option value="58mm">Thermique 58mm</option>
-              </select>
-              <div style="font-size:11px;color:#888;margin-top:4px">Réglez ceci une seule fois selon l'imprimante réelle de cet appareil : les tickets imprimés automatiquement (sans écran de choix) utiliseront toujours ce format sur ce TPE.</div>
-            </div>
-            <div class="fg" id="devPrintIPWrap" style="display:none"><label class="fl">Adresse IP imprimante</label><input class="fi" id="devPrintIP" placeholder="192.168.1.50" onchange="saveDevSettings()"></div>
-            <div class="fg"><label class="fl">Impression automatique</label>
-              <select class="fi" id="devPrintAuto" onchange="saveDevSettings()">
-                <option value="0">Désactivée — afficher l'aperçu</option>
-                <option value="1">Activée — imprimer sans aperçu</option>
-              </select>
-            </div>
-          </div>
-          <div style="display:flex;gap:10px;margin-top:14px">
+          <div style="display:flex;gap:10px;margin-top:4px">
             <button class="btn btn-r" onclick="testPrint()">🖨️ Imprimer un test</button>
             <span id="devPrintStatus" style="font-size:12px;color:#888;align-self:center"></span>
           </div>
@@ -834,7 +803,6 @@ td{padding:8px 11px;vertical-align:middle}
         </div>
         <div class="ssect"><div class="ssti">ℹ️ Compatibilité</div>
           <div style="font-size:12px;color:#777;line-height:1.9">
-            • Les imprimantes <strong style="color:#aaa">USB/Bluetooth</strong> doivent être installées comme imprimante système (Android/Windows) — le navigateur les détecte via la boîte de dialogue d'impression.<br>
             • Les douchettes <strong style="color:#aaa">USB/BT</strong> fonctionnent nativement : elles tapent le code comme un clavier dans le champ actif.<br>
             • Le scan <strong style="color:#aaa">caméra</strong> nécessite l'autorisation d'accès à la caméra du navigateur/WebView.
           </div>
@@ -1409,16 +1377,15 @@ function retourEcranPrecedent(){
 window.__fssHandleBack=function(){
   try{return retourEcranPrecedent()?'1':'0';}catch(e){return '0';}
 };
-// Sur TPE Android, le menu "Type d'imprimante" (USB/Bluetooth/Réseau) est un réglage hérité de
-// la version bureau, jamais lu par le code d'impression Android (voir doPrint/PrinterDriverFactory
-// côté natif) : le vrai pilote est détecté automatiquement. Sans indication, l'utilisateur n'a
-// aucun moyen de savoir lequel est réellement utilisé — d'où ce bandeau qui remplace le menu par
-// l'info réelle quand on tourne sur le pont natif Android.
+// Sur TPE Android, il n'y a plus aucun réglage manuel d'imprimante (type, format...) : le vrai
+// pilote (Sunmi/Senraise H10S/secours système) ET le format papier réel de l'appareil sont
+// détectés et appliqués automatiquement côté natif (voir doPrint/PrinterDriverFactory et
+// PrinterDriver.getMaxWidthPx()). Ce bandeau se contente d'afficher, à titre informatif, quel
+// pilote a été détecté.
 function rafraichirInfoImprimanteTpe(){
-  if(g('devFormatAutoTpe'))g('devFormatAutoTpe').value=formatPapierTpe();
-  if(!(window.electronAPI&&window.electronAPI.getPrinterInfo))return; // Version bureau : le menu reste pertinent tel quel.
-  g('devPrintTypeWrap').style.display='none';
+  if(!(window.electronAPI&&window.electronAPI.getPrinterInfo))return; // Version bureau : rien à afficher ici.
   var info=g('devPrintTpeInfo');
+  if(!info)return;
   info.style.display='';
   window.electronAPI.getPrinterInfo().then(function(r){
     g('devPrintTpeNom').textContent=(r&&r.name)?r.name+(r.available===false?' (non disponible actuellement)':''):'inconnu';
@@ -2032,15 +1999,10 @@ function formatPapierTpe(){
     return (localStorage.getItem('fss-format-papier-tpe')==='58mm')?'58mm':'80mm';
   }catch(e){return '80mm';}
 }
-function saveFormatAutoTpe(){
-  var v=(g('devFormatAutoTpe')&&g('devFormatAutoTpe').value==='58mm')?'58mm':'80mm';
-  try{localStorage.setItem('fss-format-papier-tpe',v);}catch(e){}
-  toast('Format papier de ce TPE enregistré ('+v+')','s');
-}
 function saveDevSettings(){
-  var type=g('devPrintType').value;
-  g('devPrintIPWrap').style.display=(type==='network')?'':'none';
-  toast('Réglages périphériques enregistrés','s');
+  // Ne reste ici que le réglage du scanner (douchette/caméra) — le type et le format
+  // d'imprimante sont désormais 100% automatiques, plus aucun réglage à enregistrer pour eux.
+  toast('Réglages enregistrés','s');
 }
 // ---- Licence : consultable et activable à tout moment depuis l'app (Paramètres > Périphériques),
 // pas seulement quand l'essai a expiré et que l'écran d'activation forcé apparaît au démarrage.
@@ -2097,7 +2059,10 @@ function activerLicenceDepuisApp(){
 }
 function testPrint(){
   g('devPrintStatus').textContent='Envoi du test...';g('devPrintStatus').style.color='#FFCC00';
-  var fmt=(g('devPrintFmt').value==='A4')?'80mm':g('devPrintFmt').value; // A4 n'a pas de sens sur un TPE : on imprime en 80mm
+  // Format demandé toujours en 80mm : sur un TPE dont l'imprimante ne supporte que le 58mm
+  // (ex: Senraise H10S/H10P), la largeur est de toute façon réduite automatiquement côté natif
+  // (voir PrinterDriver.getMaxWidthPx()) — plus besoin de choisir le format ici.
+  var fmt=formatPapierTpe();
   // Sur TPE Android, on passe par le VRAI pilote (Sunmi/H10S/secours système) via
   // imprimerSilencieux, exactement comme un ticket réel — un simple window.open()+print() (ancien
   // comportement) n'imprime jamais rien sur un TPE et donnait un faux "✅ Test envoyé" trompeur.

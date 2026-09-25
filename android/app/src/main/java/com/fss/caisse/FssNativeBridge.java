@@ -49,19 +49,12 @@ public class FssNativeBridge {
     private static final String PREFS = "fss_caisse_config";
 
     private final Context context;
-    // Référence à l'Activity (quand le contexte fourni en est une — c'est le cas dans
-    // MainActivity), utilisée UNIQUEMENT pour attacher temporairement une WebView de rendu à la
-    // fenêtre réelle de l'appli lors de l'impression (voir HtmlToBitmap) — sans quoi le bitmap
-    // rendu est très souvent blanc. Ne jamais stocker autre chose dessus qui vivrait plus
-    // longtemps que l'Activity elle-même.
-    private final android.app.Activity activity;
     private final WebView webView;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService bg = Executors.newCachedThreadPool();
     private final Licensing licensing;
 
     public FssNativeBridge(Context context, WebView webView) {
-        this.activity = (context instanceof android.app.Activity) ? (android.app.Activity) context : null;
         this.context = context.getApplicationContext();
         this.webView = webView;
         this.licensing = new Licensing(this.context);
@@ -341,7 +334,7 @@ public class FssNativeBridge {
         // driver imprimante répond "succès" (il a bien reçu et imprimé l'image... qui était vide
         // dès le rendu). Sans ça, "impression réussie" masquait un ticket blanc sorti du rendu.
         final boolean[] suspectBlank = {false};
-        HtmlToBitmap.render(activity, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
+        HtmlToBitmap.render(context, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
             @Override
             public void onSuspectBlank() {
                 suspectBlank[0] = true;
