@@ -87,14 +87,53 @@ public class HtmlToBitmap {
                 callback.onError("Impossible de préparer l'impression : aucune fenêtre active pour le rendu du ticket.");
                 return;
             }
+            Dialog dialog = null;
+            WebView webView = null;
             try {
-                WebView webView = new WebView(activity);
+                webView = new WebView(activity);
                 webView.getSettings().setJavaScriptEnabled(false);
                 webView.getSettings().setLoadWithOverviewMode(true);
                 webView.getSettings().setUseWideViewPort(false);
                 // Rendu logiciel : plus fiable pour un dessin manuel dans un Canvas hors écran
                 // que le rendu matériel (qui peut produire un bitmap vide sur certains TPE).
                 webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
+                // IMPORTANT (corrige un décentrage constaté à l'impression réelle, invisible dans
+                // les aperçus de bureau) : on crée et affiche la fenêtre hors-écran, de largeur
+                // FIXÉE à widthPx, puis on l'attache à la WebView AVANT de charger le HTML — et non
+                // après, comme dans une version précédente. Charger le HTML dans une WebView encore
+                // détachée de toute fenêtre laisse le moteur de rendu calculer une première fois la
+                // mise en page (centrage du texte, largeurs en %) par rapport à une largeur par
+                // défaut différente de widthPx ; le redimensionnement ultérieur ne rattrape pas
+                // toujours ce calcul sur tous les modèles de TPE, d'où des titres "FSS-CAISSE" /
+                // "BON DE COMMANDE" mal centrés à l'impression alors qu'un rendu fait directement à
+                // la bonne largeur (comme un aperçu navigateur) semblait correct. En attachant la
+                // WebView à sa largeur définitive dès le départ, la toute première mise en page se
+                // fait déjà à la largeur réelle du ticket.
+                dialog = new Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar);
+                dialog.setCancelable(false);
+                FrameLayout container = new FrameLayout(activity);
+                container.addView(webView, new FrameLayout.LayoutParams(widthPx, FrameLayout.LayoutParams.WRAP_CONTENT));
+                dialog.setContentView(container);
+
+                Window window = dialog.getWindow();
+                if (window != null) {
+                    window.setLayout(widthPx, WindowManager.LayoutParams.WRAP_CONTENT);
+                    window.setGravity(Gravity.TOP | Gravity.START);
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                    window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+                    WindowManager.LayoutParams attrs = window.getAttributes();
+                    // Très loin hors de l'écran plutôt qu'à taille nulle : certains fabricants
+                    // annulent silencieusement le rendu d'une fenêtre de taille 0x0.
+                    attrs.x = -10000;
+                    attrs.y = -10000;
+                    window.setAttributes(attrs);
+                }
+                dialog.show();
+
+                final Dialog dialogRef = dialog;
                 webView.setWebViewClient(new WebViewClient() {
                     // IMPORTANT — sans ce recouvrement, si le processus de rendu partagé par TOUTES
                     // les WebViews de l'appli plante, le comportement PAR DÉFAUT d'Android est de
@@ -107,6 +146,7 @@ public class HtmlToBitmap {
                                 + "(crashed=" + detail.didCrash() + ") — impression annulée sans "
                                 + "faire planter l'application.");
                         try { view.destroy(); } catch (Exception ignored) {}
+                        try { dialogRef.dismiss(); } catch (Exception ignored) {}
                         callback.onError("Le moteur d'affichage a redémarré pendant la préparation du "
                                 + "ticket (mémoire limitée de l'appareil ?) — réessayez l'impression.");
                         return true;
@@ -114,11 +154,13 @@ public class HtmlToBitmap {
 
                     @Override
                     public void onPageFinished(WebView view, String url) {
-                        captureInOwnWindow(activity, view, widthPx, callback);
+                        waitForStableHeightThenCapture(dialogRef, view, widthPx, callback, 0, -1, 0);
                     }
                 });
                 webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
             } catch (Exception e) {
+                try { if (webView != null) webView.destroy(); } catch (Exception ignored) {}
+                try { if (dialog != null) dialog.dismiss(); } catch (Exception ignored) {}
                 callback.onError("Impossible de préparer le rendu du ticket : " + e.getMessage());
             }
         });
@@ -133,47 +175,6 @@ public class HtmlToBitmap {
     private static final int STABILITY_CHECK_DELAY_MS = 80;
     private static final int STABILITY_REQUIRED_CONSECUTIVE = 3;
     private static final int STABILITY_MAX_CHECKS = 50; // ~50 x 80ms = 4s max avant capture forcée
-
-    /**
-     * Héberge la WebView dans une fenêtre Dialog totalement indépendante de celle de l'Activité
-     * (invisible, hors-écran, ni tactile ni focusable) puis attend que le CONTENU ait fini de
-     * grandir (hauteur stable sur plusieurs vérifications successives, voir
-     * waitForStableHeightThenCapture) avant de dessiner le contenu dans un bitmap. Comme cette
-     * fenêtre n'appartient qu'à ce rendu et à rien d'autre dans l'appli, aucune repasse de layout
-     * déclenchée par le reste de l'interface ne peut plus jamais lui faire perdre sa taille avant
-     * la capture (c'était la cause du bug "ticket blanc" historique).
-     */
-    private static void captureInOwnWindow(Activity activity, WebView webView, int widthPx, Callback callback) {
-        try {
-            Dialog dialog = new Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar);
-            dialog.setCancelable(false);
-            FrameLayout container = new FrameLayout(activity);
-            container.addView(webView, new FrameLayout.LayoutParams(widthPx, FrameLayout.LayoutParams.WRAP_CONTENT));
-            dialog.setContentView(container);
-
-            Window window = dialog.getWindow();
-            if (window != null) {
-                window.setLayout(widthPx, WindowManager.LayoutParams.WRAP_CONTENT);
-                window.setGravity(Gravity.TOP | Gravity.START);
-                window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-                window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
-                WindowManager.LayoutParams attrs = window.getAttributes();
-                // Très loin hors de l'écran plutôt qu'à taille nulle : certains fabricants
-                // annulent silencieusement le rendu d'une fenêtre de taille 0x0.
-                attrs.x = -10000;
-                attrs.y = -10000;
-                window.setAttributes(attrs);
-            }
-
-            dialog.show();
-            waitForStableHeightThenCapture(dialog, webView, widthPx, callback, 0, -1, 0);
-        } catch (Exception e) {
-            try { webView.destroy(); } catch (Exception ignored) {}
-            callback.onError("Impossible de préparer la fenêtre de rendu du ticket : " + e.getMessage());
-        }
-    }
 
     /**
      * Interroge webView.getContentHeight() (hauteur RÉELLE du document HTML chargé, en pixels CSS,

@@ -1755,9 +1755,9 @@ function imprimerAddition(attId,nbParts,format){
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:12px;font-weight:700;padding:3mm 4mm}'+
-    'table{width:100%;border-collapse:collapse;margin:2px 0}'+
-    'td{padding:2px 0;vertical-align:top}'+
+    'body{font-family:"Courier New",monospace;font-size:10px;font-weight:900;padding:3mm 4mm}'+
+    'table{width:100%;border-collapse:collapse;margin:0}'+
+    'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
     'td.r{text-align:right;padding-left:10px}'+
     '.sep{border-top:1px dashed #000;margin:6px 0}'+
@@ -1850,9 +1850,9 @@ function imprimerTicketCommande(tx){
   var css='@page{size:80mm auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:13px;font-weight:900;padding:3mm 4mm}'+
-    'table{width:100%;border-collapse:collapse;margin:2px 0}'+
-    'td{padding:2px 0;vertical-align:top}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:3mm 4mm}'+
+    'table{width:100%;border-collapse:collapse;margin:0}'+
+    'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
     'td.r{text-align:right;padding-left:10px}'+
     '.sep{border-top:1px dashed #000;margin:6px 0}'+
@@ -1869,8 +1869,12 @@ function imprimerTicketCommande(tx){
     return '<div style="text-align:left;margin-bottom:3px"><span style="display:inline-block;width:7ch">'+label+'</span>: '+val+'</div>';
   }
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>';
-  html+='<div class="c" style="font-size:16px">'+etab+'</div>';
-  html+='<div class="c" style="font-size:15px;margin:4px 0">🧾 BON DE COMMANDE</div>';
+  // Pas d'émoji ici : certains TPE (Sunmi/Senraise) n'ont pas de police emoji embarquée, et le
+  // glyphe de remplacement ("tofu") ajoute une largeur imprévisible qui décentre visuellement le
+  // titre par rapport au nom de l'établissement — texte pur, garanti bien centré sur les deux
+  // lignes quel que soit l'appareil.
+  html+='<div class="c" style="font-size:16px"><strong>'+etab+'</strong></div>';
+  html+='<div class="c" style="font-size:15px;margin:4px 0"><strong>BON DE COMMANDE</strong></div>';
   html+='<div class="sep"></div>';
   html+=ligneG('N°','<strong>'+tx.id+'</strong>');
   html+=ligneG('Table',tx.tbl||'—');
@@ -2401,9 +2405,9 @@ function imprimerRecu(format){
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:12px;font-weight:700;padding:3mm 4mm}'+
-    'table{width:100%;border-collapse:collapse;margin:2px 0}'+
-    'td{padding:2px 0;vertical-align:top}'+
+    'body{font-family:"Courier New",monospace;font-size:10px;font-weight:900;padding:3mm 4mm}'+
+    'table{width:100%;border-collapse:collapse;margin:0}'+
+    'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
     'td.r{text-align:right;padding-left:10px}'+
     '.sep{border-top:1px dashed #000;margin:7px 0}'+
