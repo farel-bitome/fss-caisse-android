@@ -133,6 +133,24 @@ public class HtmlToBitmap {
                 }
                 dialog.show();
 
+                // CRUCIAL — et probablement la vraie cause du décentrage encore observé après le
+                // fait d'attacher la WebView à sa fenêtre AVANT le chargement : dialog.show() ne
+                // fait que DEMANDER l'ajout de la fenêtre au système, la vraie mesure/mise en page
+                // de son contenu (par ViewRootImpl) n'a lieu qu'à la frame suivante, de façon
+                // asynchrone. Comme loadDataWithBaseURL() est appelé juste après sur la même pile
+                // d'appels, la WebView peut donc démarrer le chargement du HTML alors qu'elle a
+                // encore une largeur mesurée de 0 (cette frame de layout système n'a pas encore eu
+                // lieu) — et c'est CETTE largeur (0, ou une valeur transitoire) que le moteur de
+                // rendu utilise pour calculer le centrage (text-align:center) et les largeurs en %,
+                // pas widthPx. On force donc ici, de façon SYNCHRONE et immédiate (sans attendre
+                // aucune passe de layout système), un measure()+layout() de la WebView à widthPx
+                // AVANT tout chargement de contenu — la même technique que celle déjà utilisée pour
+                // la capture finale (voir applyMeasuredHeight), mais appliquée ici en amont.
+                int widthSpec = View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY);
+                int placeholderHeightSpec = View.MeasureSpec.makeMeasureSpec(1, View.MeasureSpec.AT_MOST);
+                webView.measure(widthSpec, placeholderHeightSpec);
+                webView.layout(0, 0, widthPx, Math.max(1, webView.getMeasuredHeight()));
+
                 final Dialog dialogRef = dialog;
                 webView.setWebViewClient(new WebViewClient() {
                     // IMPORTANT — sans ce recouvrement, si le processus de rendu partagé par TOUTES

@@ -1755,7 +1755,7 @@ function imprimerAddition(attId,nbParts,format){
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:10px;font-weight:900;padding:3mm 4mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:3mm 4mm}'+
     'table{width:100%;border-collapse:collapse;margin:0}'+
     'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
@@ -1789,7 +1789,7 @@ function imprimerAddition(attId,nbParts,format){
         html+=ligne(qty+'x '+it.nom,(it.pv*qty).toLocaleString('fr-FR')+' F');
       });
       html+='<div class="sep"></div>';
-      html+='<div style="font-size:16px">'+ligne('<strong>TOTAL À PAYER</strong>','<strong>'+ttc.toLocaleString('fr-FR')+' F</strong>')+'</div>';
+      html+='<div style="font-size:13px">'+ligne('<strong>TOTAL À PAYER</strong>','<strong>'+ttc.toLocaleString('fr-FR')+' F</strong>')+'</div>';
     }else{
       // Addition divisée : chaque exemplaire affiche sa part, pas la liste
       // complète des articles (chaque groupe paiera sa portion séparément).
@@ -2405,7 +2405,7 @@ function imprimerRecu(format){
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:10px;font-weight:900;padding:3mm 4mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:3mm 4mm}'+
     'table{width:100%;border-collapse:collapse;margin:0}'+
     'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
