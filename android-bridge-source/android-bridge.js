@@ -87,9 +87,12 @@
   // communication avec Node, donc il reste consultable même si cordova-bridge est cassé ou si
   // le process Node n'a jamais atteint le point où il aurait pu poster un événement.
   function refreshLiveStatus(elapsedSec) {
-    call('getStartupLog', {}).then(function (log) {
+    Promise.all([call('getStartupLog', {}), call('getNativePluginLog', {})]).then(function (results) {
+      var log = results[0];
+      var pluginLog = results[1];
       showStatus('Démarrage du serveur embarqué… (' + elapsedSec + 's)\n\n' +
-        '--- Journal (nodejs-project/main.js) ---\n' + ((log && log.content) || '(vide)'));
+        '--- Journal (nodejs-project/main.js) ---\n' + ((log && log.content) || '(vide)') +
+        '\n\n--- Journal natif du plugin (NodeJS.java) ---\n' + ((pluginLog && pluginLog.content) || '(vide)'));
     });
   }
 
@@ -167,9 +170,10 @@
           // les cas, on va aussi chercher le journal écrit sur disque par main.js : lui ne
           // dépend d'aucun canal de communication, donc il reste fiable même si celui-ci a un
           // problème.
-          Promise.all([call('getStartupLog', {}), call('getNodeDiagnostics', {})]).then(function (results) {
+          Promise.all([call('getStartupLog', {}), call('getNodeDiagnostics', {}), call('getNativePluginLog', {})]).then(function (results) {
             var log = results[0];
             var diag = results[1] || {};
+            var pluginLog = results[2];
             var base = window.__fssServerLastError
               ? 'Erreur du serveur embarqué :\n' + window.__fssServerLastError
               : 'Le serveur embarqué ne répond pas après 20s.';
@@ -179,8 +183,15 @@
               JSON.stringify(diag.nativeLibs || [], null, 0) + '\n' +
               'Contenu de /files (racine) :\n' + JSON.stringify(diag.topLevelFilesDir || [], null, 0) + '\n' +
               'main.js trouvé sur le disque :\n' + JSON.stringify(diag.mainJsFound || [], null, 2);
+            // Journal du plugin natif nodejs-mobile-cordova lui-même (pluginInitialize,
+            // asyncInit, copyNodeJSAssets, execute) — existe même quand main.js n'a JAMAIS pu
+            // démarrer (ex : extraction des assets qui plante avant d'atteindre main.js), donc
+            // souvent plus parlant que startup.log dans ce cas précis.
             showStatus(base + '\n\n--- Journal (nodejs-project/main.js) ---\n' +
-              ((log && log.content) || '(vide)') + '\n\n' + diagText);
+              ((log && log.content) || '(vide)') +
+              '\n\n--- Journal natif du plugin (NodeJS.java) ---\n' +
+              ((pluginLog && pluginLog.content) || '(vide)') +
+              '\n\n' + diagText);
           });
         } else {
           hideStatus();

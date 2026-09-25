@@ -98,15 +98,20 @@ l'appli déjà en ligne sur le Play Store (Google exige la même signature à ch
 npm install
 node scripts/generate-node-asset-lists.js   # après toute modif de www/nodejs-project ou node_modules
 npx cap sync android
+mkdir -p android/app/src/main/assets/nodejs-mobile-cordova-assets
+cp -r node_modules/nodejs-mobile-cordova/install/nodejs-mobile-cordova-assets/. \
+      android/app/src/main/assets/nodejs-mobile-cordova-assets/
+node scripts/patch-nodejs-plugin-diagnostics.js
 ```
 
 Puis ouvrir `android/` dans Android Studio.
 
-⚠️ Après un `npx cap sync android`, le dossier `android/app/src/main/assets/www/nodejs-project`
-et les fichiers `file.list`/`dir.list` ne sont PAS gérés par Capacitor (ils vivent en dehors de
-`www/`, volontairement — voir plus bas) : ils survivent au sync mais il faut relancer
-`node scripts/generate-node-asset-lists.js` après toute modification du contenu de
-`nodejs-project`.
+⚠️ Après un `npx cap sync android`, le dossier `android/app/src/main/assets/www/nodejs-project`,
+les fichiers `file.list`/`dir.list`, le dossier `nodejs-mobile-cordova-assets/` ET le patch de
+`NodeJS.java` ne sont PAS gérés par Capacitor (voir "Panne résolue" plus bas pour le détail de
+pourquoi ces trois dernières étapes sont nécessaires) : il faut relancer les quatre commandes
+ci-dessus (dans cet ordre) après tout `npx cap sync android`. Le workflow GitHub Actions le fait
+déjà automatiquement à chaque build.
 
 ## Pourquoi `nodejs-project` n'est pas dans `www/` malgré ce que dit la doc de nodejs-mobile-cordova
 
@@ -166,6 +171,51 @@ Pour une fiabilité maximale sur le terrain, il est recommandé en plus d'exclur
 l'optimisation de batterie du fabricant (Réglages → Batterie → FSS-CAISSE TPE → Sans
 restriction) — certains fabricants de TPE (dont Sunmi) ont leurs propres mécanismes
 d'économie d'énergie agressifs qui ignorent parfois les APIs Android standard.
+
+## Panne résolue : le mode autonome restait bloqué 20s sans jamais démarrer
+
+Sur un TPE réel, `window.nodejs.start('main.js', ...)` ne renvoyait **ni succès ni erreur** — juste
+le message générique "Le serveur embarqué ne répond pas après 20s.", avec un journal
+(`startup.log`) introuvable et aucune extraction de `nodejs-project` sur le disque
+(`/files` ne contenait que `trial.json`).
+
+**Cause racine identifiée avec certitude** (en lisant directement le vrai code source de
+`nodejs-mobile-cordova@0.4.3`, pas une supposition) : `NodeJS.java` (le plugin natif) commence
+TOUJOURS sa procédure d'extraction (`copyNodeJSAssets()`) par copier un dossier d'assets propre au
+plugin, `nodejs-mobile-cordova-assets/` (petits modules Node intégrés). Ce dossier n'est
+normalement copié dans les assets Android que par le hook Cordova `before_plugin_install` du
+plugin — un hook qui, comme celui de `file.list`/`dir.list` (déjà contourné par
+`generate-node-asset-lists.js`), **ne s'exécute pas sous Capacitor** (`npx cap sync android` ne
+lance pas le cycle de hooks complet de Cordova). Ce dossier était donc totalement absent de l'APK.
+
+Quand `assetManager.list("nodejs-mobile-cordova-assets")` porte sur un dossier qui n'existe pas du
+tout (pas juste vide), Android renvoie `null` plutôt qu'un tableau vide — et la ligne suivante du
+plugin (`files.length == 0`) lève alors une `NullPointerException`. Cette exception n'est **pas**
+une `IOException`, donc elle n'est rattrapée par aucun `catch` du plugin : le thread
+d'initialisation meurt en silence, **avant même d'avoir libéré le verrou (`Semaphore`) que
+`startEngine()` attend juste après** pour savoir si l'extraction a réussi. Résultat :
+`startEngine()` reste bloqué indéfiniment sur ce verrou, sans jamais pouvoir appeler ni le
+callback de succès ni celui d'échec — exactement le symptôme observé (silence total, jamais de
+message précis, juste notre propre timeout générique de 20s côté JS).
+
+**Corrections apportées** (`.github/workflows/build-android.yml` + `scripts/patch-nodejs-plugin-diagnostics.js`) :
+1. Le dossier `nodejs-mobile-cordova-assets/` est maintenant copié depuis
+   `node_modules/nodejs-mobile-cordova/install/` vers les assets Android à chaque build — élimine
+   la cause racine.
+2. Par sécurité pour tout souci équivalent non encore rencontré (autre dossier manquant sur un
+   autre modèle de TPE, etc.), `scripts/patch-nodejs-plugin-diagnostics.js` patche automatiquement
+   le `NodeJS.java` régénéré par `cap sync` (à chaque build, car ce fichier est régénéré à chaque
+   fois) pour : rattraper *toute* exception (pas seulement `IOException`) autour de la copie des
+   assets, **libérer le verrou dans un bloc `finally`** (plus jamais de blocage permanent, quelle
+   qu'en soit la cause), et journaliser chaque étape (`pluginInitialize`, `asyncInit`,
+   `copyNodeJSAssets`, `execute`) dans `<stockage interne>/fss-data/native-plugin.log` —
+   consultable directement dans l'appli (le même écran de diagnostic qui affichait déjà
+   `startup.log` affiche maintenant aussi ce journal natif, via
+   `FssNativeBridge.getNativePluginLog()`), sans avoir besoin d'`adb` sur le TPE.
+
+Si un souci de démarrage du mode autonome revient malgré ces correctifs, ce nouveau journal natif
+dira précisément à quelle étape ça bloque, ce qui rendra le diagnostic immédiat au lieu de devoir
+à nouveau remonter toute la chaîne d'appels.
 
 ## Limites connues / à trancher
 

@@ -168,6 +168,33 @@ public class FssNativeBridge {
                 respond(callbackId, r);
                 break;
             }
+            case "getNativePluginLog": {
+                // Journal écrit directement par le plugin natif nodejs-mobile-cordova (patché
+                // par scripts/patch-nodejs-plugin-diagnostics.js) — pluginInitialize(),
+                // asyncInit(), copyNodeJSAssets() et execute(). Contrairement à startup.log
+                // (écrit par NOTRE main.js, donc seulement si Node a pu démarrer), celui-ci
+                // existe dès que le plugin natif lui-même est sollicité, même si l'extraction
+                // des assets plante avant d'avoir jamais atteint main.js — c'est ce qui a permis
+                // d'identifier la cause du blocage silencieux du mode autonome (voir
+                // build-android.yml : "Copier les assets natifs du plugin").
+                JSONObject r = new JSONObject();
+                try {
+                    File logFile = new File(context.getFilesDir(), "fss-data/native-plugin.log");
+                    if (logFile.exists()) {
+                        byte[] data = new byte[(int) logFile.length()];
+                        try (java.io.FileInputStream fis = new java.io.FileInputStream(logFile)) {
+                            fis.read(data);
+                        }
+                        r.put("content", new String(data, "UTF-8"));
+                    } else {
+                        r.put("content", "(fichier native-plugin.log introuvable — le plugin NodeJS natif n'a peut-être jamais été sollicité)");
+                    }
+                } catch (Exception e) {
+                    r.put("content", "Erreur de lecture du journal natif : " + e.getMessage());
+                }
+                respond(callbackId, r);
+                break;
+            }
             case "getNodeDiagnostics": {
                 // Diagnostic 100% natif (Java), qui ne dépend ni de Node ni du canal
                 // cordova-bridge — utile quand startup.log lui-même n'apparaît jamais, ce qui

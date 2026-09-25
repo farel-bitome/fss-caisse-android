@@ -80,6 +80,31 @@ jobs:
       - name: Régénérer file.list / dir.list (nodejs-project)
         run: node scripts/generate-node-asset-lists.js
 
+      - name: Copier les assets natifs du plugin (nodejs-mobile-cordova-assets)
+        # Cause racine vérifiée du blocage silencieux du mode autonome : ce dossier
+        # (modules Node intégrés au plugin) n'est normalement copié dans les assets Android que
+        # par le hook Cordova "before_plugin_install", qui — comme celui de file.list/dir.list
+        # ci-dessus — ne s'exécute PAS sous "npx cap sync android". Sans lui,
+        # NodeJS.java (copyNodeJSAssets) plante avec une NullPointerException dès sa toute
+        # première étape (assetManager.list() sur un dossier absent renvoie null, pas un tableau
+        # vide), AVANT MÊME de copier nodejs-project — et comme cette exception n'est pas une
+        # IOException, le sémaphore d'initialisation du plugin n'est jamais libéré : le
+        # démarrage du serveur reste bloqué indéfiniment, sans le moindre message d'erreur.
+        # Voir scripts/patch-nodejs-plugin-diagnostics.js pour le détail complet et un filet de
+        # sécurité contre tout souci équivalent à l'avenir.
+        run: |
+          mkdir -p android/app/src/main/assets/nodejs-mobile-cordova-assets
+          cp -r node_modules/nodejs-mobile-cordova/install/nodejs-mobile-cordova-assets/. \
+                android/app/src/main/assets/nodejs-mobile-cordova-assets/
+          find android/app/src/main/assets/nodejs-mobile-cordova-assets -maxdepth 1
+
+      - name: Patcher NodeJS.java (robustesse + journal de diagnostic natif)
+        # Corrige en plus, pour toute cause similaire non encore rencontrée, le fait qu'une
+        # exception inattendue pendant la copie des assets pouvait bloquer waitForInit() pour
+        # toujours (sémaphore jamais libéré) — et ajoute un journal natif consultable depuis
+        # l'appli (FssNativeBridge.getNativePluginLog / android-bridge.js), sans adb.
+        run: node scripts/patch-nodejs-plugin-diagnostics.js
+
       - name: Rendre gradlew exécutable
         # gradlew perd son bit d'exécution en passant par un système de fichiers Windows
         # (via un zip ou un commit depuis GitHub Desktop) — on le rétablit explicitement.
