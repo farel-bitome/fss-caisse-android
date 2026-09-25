@@ -6,8 +6,10 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
@@ -36,6 +38,8 @@ import androidx.annotation.NonNull;
  *      détacher aussitôt après.
  */
 public class HtmlToBitmap {
+
+    private static final String TAG = "FSS-HtmlToBitmap";
 
     public interface Callback {
         void onBitmap(Bitmap bitmap);
@@ -73,6 +77,28 @@ public class HtmlToBitmap {
                 webView.layout(0, 0, widthPx, 10);
 
                 webView.setWebViewClient(new WebViewClient() {
+                    // IMPORTANT — sans ce recouvrement, si le processus de rendu partagé par TOUTES
+                    // les WebViews de l'appli plante (ex : accumulation de rendus rapides pendant
+                    // une rafale d'impressions, mémoire limitée d'un TPE), le comportement PAR
+                    // DÉFAUT d'Android est de tuer immédiatement TOUTE l'application (documenté :
+                    // "the app will crash if the renderer process crashes" quand ce callback n'est
+                    // pas recouvert). C'est très probablement la cause exacte du plantage observé
+                    // juste après une impression, suivi d'un redémarrage qui reste bloqué sur l'écran
+                    // de démarrage. En le recouvrant et en renvoyant true, on signale à Android
+                    // qu'on a géré la situation nous-mêmes — l'appli continue de tourner, seule
+                    // cette impression échoue proprement (l'utilisateur peut réessayer).
+                    @Override
+                    public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                        Log.e(TAG, "Processus de rendu WebView perdu pendant le rendu d'un ticket "
+                                + "(crashed=" + detail.didCrash() + ") — impression annulée sans "
+                                + "faire planter l'application.");
+                        try { root.removeView(view); } catch (Exception ignored) {}
+                        try { view.destroy(); } catch (Exception ignored) {}
+                        callback.onError("Le moteur d'affichage a redémarré pendant la préparation du "
+                                + "ticket (mémoire limitée de l'appareil ?) — réessayez l'impression.");
+                        return true; // Géré ici : ne PAS laisser Android tuer toute l'application.
+                    }
+
                     @Override
                     public void onPageFinished(WebView view, String url) {
                         view.postDelayed(() -> {

@@ -1,5 +1,7 @@
 package com.fss.caisse;
 
+import android.util.Log;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 
@@ -16,8 +18,36 @@ import com.getcapacitor.BridgeWebViewClient;
  */
 public class FssWebViewClient extends BridgeWebViewClient {
 
+    private static final String TAG = "FSS-WebViewClient";
+
     public FssWebViewClient(Bridge bridge) {
         super(bridge);
+    }
+
+    /**
+     * Filet de sécurité pour la WebView PRINCIPALE (celle qui affiche toute l'appli) : sans ce
+     * recouvrement, si son processus de rendu partagé venait à planter, le comportement par défaut
+     * d'Android est de tuer immédiatement toute l'application (comportement documenté). On tente
+     * plutôt de reconstruire l'Activity (donc une WebView neuve, qui redémarre proprement sur
+     * l'écran de démarrage) — l'utilisateur voit un bref rechargement plutôt qu'un plantage brutal
+     * de l'appli. Voir aussi HtmlToBitmap, où la même protection existe pour les WebViews
+     * temporaires utilisées à chaque impression.
+     */
+    @Override
+    public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+        Log.e(TAG, "Processus de rendu de la WebView principale perdu (crashed=" + detail.didCrash()
+                + ") — reconstruction de l'Activity au lieu de laisser Android fermer l'application.");
+        try {
+            android.content.Context ctx = view.getContext();
+            if (ctx instanceof android.app.Activity) {
+                final android.app.Activity activity = (android.app.Activity) ctx;
+                activity.runOnUiThread(activity::recreate);
+                return true; // Géré ici : ne PAS laisser Android tuer toute l'application.
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Échec de la reconstruction après perte du rendu : " + e.getMessage());
+        }
+        return false; // Impossible de récupérer proprement ici : comportement système par défaut.
     }
 
     @Override

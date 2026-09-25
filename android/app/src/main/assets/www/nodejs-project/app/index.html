@@ -989,7 +989,11 @@ ART-001,Regab,Bière,Bouteille,2500,1500,50,10,🍺"></textarea>
     </div>
     <p style="font-size:11px;color:#666;text-align:center;margin-top:10px">1 part = addition classique. Plus de 1 = un ticket séparé par part, chacun avec sa portion du total.</p>
   </div>
-  <div class="mf"><button class="btn btn-o" onclick="closeM('ovAdditionSplit')">Annuler</button><button class="btn btn-r" onclick="confirmerImpressionAddition()">🖨️ Imprimer</button></div>
+  <div class="mf" style="gap:8px">
+    <button class="btn btn-o" onclick="closeM('ovAdditionSplit')">✕ Annuler</button>
+    <button class="btn btn-o" style="flex:1" onclick="confirmerImpressionAddition('58mm')">🖨️ 58mm</button>
+    <button class="btn btn-r" style="flex:1" onclick="confirmerImpressionAddition('80mm')">🖨️ 80mm</button>
+  </div>
 </div></div>
 <div class="ov" id="ovHistCloture"><div class="md lg"><div class="mh"><span class="mt">🗂️ Historique des clôtures</span><button class="mc" onclick="closeM('ovHistCloture')">✕</button></div>
   <div class="mb">
@@ -1315,11 +1319,16 @@ window.addEventListener('unhandledrejection',function(e){
 });
 function closeM(id){g(id).classList.remove('on');}
 // ---- Navigation "retour" (bouton visible dans l'appli + bouton retour matériel Android) ----
-// navHistory garde la pile des pages de premier niveau visitées (jamais les sous-onglets, qui
-// restent de simples onglets frères) — le dernier élément est toujours la page courante.
-var navHistory=['caisse'];
+// navHistory garde la pile de TOUTES les étapes visitées, pages de premier niveau ET
+// sous-onglets (ex: Paramètres > Périphériques) — le dernier élément est toujours l'étape
+// courante. Chaque entrée est soit {type:'page',name} soit {type:'sub',page,sub}.
+var navHistory=[{type:'page',name:'caisse'}];
 function navButtonFor(name){
   return document.querySelector('#nav button[onclick^="goPage(\''+name+'\'"]');
+}
+function subBoutonPour(page,sub){
+  var pg=g('pg-'+page);if(!pg)return null;
+  return pg.querySelector('.it[onclick*="goSub(\''+page+'\',\''+sub+'\'"]');
 }
 function majBoutonRetourApp(){
   var b=g('btnRetourApp');
@@ -1334,17 +1343,41 @@ function _activerPage(name,btn){
   if(!btn)btn=navButtonFor(name);
   if(btn)btn.classList.add('on');
 }
+function _activerSub(page,sub,btn){
+  var pg=g('pg-'+page);if(!pg)return;
+  pg.querySelectorAll('.sub').forEach(function(s){s.classList.remove('on');});
+  pg.querySelectorAll('.it').forEach(function(t){t.classList.remove('on');});
+  var s=g('sub-'+page+'-'+sub);if(s)s.classList.add('on');
+  if(!btn)btn=subBoutonPour(page,sub);
+  if(btn)btn.classList.add('on');
+}
+function _activerEtape(etape){
+  if(etape.type==='sub')_activerSub(etape.page,etape.sub);
+  else _activerPage(etape.name);
+}
 function goPage(name,btn){
-  if(name!==navHistory[navHistory.length-1])navHistory.push(name);
+  var top=navHistory[navHistory.length-1];
+  if(!(top.type==='page'&&top.name===name))navHistory.push({type:'page',name:name});
   _activerPage(name,btn);
   majBoutonRetourApp();
 }
-// Appelée par le bouton "← Retour" visible dans l'appli ET par le bouton retour matériel
-// Android (voir MainActivity.onBackPressed, qui interroge window.__fssHandleBack) — un seul
-// et même mécanisme pour les deux, pour un comportement cohérent partout dans l'appli :
+function goSub(page,sub,btn){
+  _activerSub(page,sub,btn);
+  var top=navHistory[navHistory.length-1];
+  if(!(top.type==='sub'&&top.page===page&&top.sub===sub))navHistory.push({type:'sub',page:page,sub:sub});
+  majBoutonRetourApp();
+  if(page==='params'&&sub==='airtel')loadAirtelStatus();
+  if(page==='params'&&sub==='sauv')renderHistoriqueSauvegardes();
+  if(page==='params'&&sub==='cats')initCategories();
+  if(page==='params'&&sub==='dev')rafraichirInfoImprimanteTpe();
+  if(page==='personnel'&&sub==='archives')renderArchives();
+}
+// Appelée par le bouton "← Retour" visible dans l'appli (à CHAQUE étape : pages ET
+// sous-onglets) ET par le bouton retour matériel Android (voir MainActivity.onBackPressed, qui
+// interroge window.__fssHandleBack) — un seul et même mécanisme pour les deux :
 //  1) Une modale ouverte (fiche article, paiement, reçu...) ? On la ferme, comme un "retour"
 //     naturel depuis un formulaire.
-//  2) Sinon, un écran de premier niveau précédent dans l'historique ? On y revient.
+//  2) Sinon, une étape précédente dans l'historique (page OU sous-onglet) ? On y revient.
 //  3) Sinon (déjà sur Caisse, rien d'ouvert) : rien à faire ici — c'est au niveau natif de
 //     proposer de quitter l'application (voir confirmerSortie() côté Android).
 function retourEcranPrecedent(){
@@ -1353,33 +1386,21 @@ function retourEcranPrecedent(){
   if(navHistory.length>1){
     navHistory.pop();
     var precedent=navHistory[navHistory.length-1];
-    _activerPage(precedent);
+    _activerEtape(precedent);
     majBoutonRetourApp();
     return true;
   }
   return false;
 }
 // Pont consulté par MainActivity.onBackPressed (Android) avant de décider de fermer l'appli —
-// renvoie '1' si l'appui sur "retour" a été géré ICI (modale fermée ou écran précédent affiché),
-// '0' si l'appli était déjà sur son écran d'accueil sans rien d'ouvert (le natif peut alors
-// proposer de quitter). Renvoie une chaîne plutôt qu'un booléen car evaluateJavascript()
+// renvoie '1' si l'appui sur "retour" a été géré ICI (modale fermée ou étape précédente
+// affichée), '0' si l'appli était déjà sur son écran d'accueil sans rien d'ouvert (le natif peut
+// alors proposer de quitter). Renvoie une chaîne plutôt qu'un booléen car evaluateJavascript()
 // sérialise la valeur en JSON avant de la renvoyer au code Java, et une chaîne explicite évite
 // toute ambiguïté de comparaison côté natif.
 window.__fssHandleBack=function(){
   try{return retourEcranPrecedent()?'1':'0';}catch(e){return '0';}
 };
-function goSub(page,sub,btn){
-  var pg=g('pg-'+page);if(!pg)return;
-  pg.querySelectorAll('.sub').forEach(function(s){s.classList.remove('on');});
-  pg.querySelectorAll('.it').forEach(function(t){t.classList.remove('on');});
-  var s=g('sub-'+page+'-'+sub);if(s)s.classList.add('on');
-  if(btn)btn.classList.add('on');
-  if(page==='params'&&sub==='airtel')loadAirtelStatus();
-  if(page==='params'&&sub==='sauv')renderHistoriqueSauvegardes();
-  if(page==='params'&&sub==='cats')initCategories();
-  if(page==='params'&&sub==='dev')rafraichirInfoImprimanteTpe();
-  if(page==='personnel'&&sub==='archives')renderArchives();
-}
 // Sur TPE Android, le menu "Type d'imprimante" (USB/Bluetooth/Réseau) est un réglage hérité de
 // la version bureau, jamais lu par le code d'impression Android (voir doPrint/PrinterDriverFactory
 // côté natif) : le vrai pilote est détecté automatiquement. Sans indication, l'utilisateur n'a
@@ -1729,20 +1750,27 @@ function ajusterAdditionSplit(delta){
   additionSplitN=Math.max(1,Math.min(6,additionSplitN+delta));
   if(g('additionSplitVal'))g('additionSplitVal').textContent=additionSplitN;
 }
-function confirmerImpressionAddition(){
+function confirmerImpressionAddition(format){
   closeM('ovAdditionSplit');
-  imprimerAddition(additionSplitAttId,additionSplitN);
+  imprimerAddition(additionSplitAttId,additionSplitN,format);
 }
-function imprimerAddition(attId,nbParts){
+function imprimerAddition(attId,nbParts,format){
+  // format : '58mm' ou '80mm' (choisi via les boutons de la page de validation de l'addition).
+  format=(format==='58mm')?'58mm':'80mm';
   nbParts=Math.max(1,nbParts||1);
   if(window.isWaiterOnly&&window.isWaiterOnly()){toast("Ce compte ne peut pas sortir l'addition","e");return;}
   var c=cmdAttente.find(function(x){return x.id===attId;});
   if(!c){toast('Commande introuvable','e');return;}
   var etab=g('etabNom')?g('etabNom').value:'FSS-CAISSE';
   var ttc=c.total;
-  var css='@page{size:80mm auto;margin:0}'+
+  // Sur TPE Android (pont natif présent), on imprime directement via le VRAI pilote
+  // (Sunmi/H10S/secours système) — un window.open()+window.print() (ancien comportement) ne
+  // déclenche jamais rien sur un TPE : c'était exactement le "la page ne m'a pas affiché l'écran
+  // pour sélectionner 58mm/80mm" et l'addition qui ne sortait jamais réellement.
+  var viaNatif=!!(window.electronAPI&&window.electronAPI.printSilent);
+  var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
-    'html,body{width:80mm}'+
+    'html,body{width:'+format+'}'+
     'body{font-family:"Courier New",monospace;font-size:12px;font-weight:700;padding:3mm 4mm}'+
     'table{width:100%;border-collapse:collapse;margin:2px 0}'+
     'td{padding:2px 0;vertical-align:top}'+
@@ -1789,12 +1817,24 @@ function imprimerAddition(attId,nbParts){
     pages.push('<div class="'+cls+'">'+buildAdditionBody(pi+1)+'</div>');
   }
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>'+pages.join('')+'</body></html>';
-  var w=window.open('','_blank','width=380,height=600');
-  w.document.write(html);w.document.close();
-  w.onafterprint=function(){w.close();};
-  setTimeout(function(){w.print();},400);
-  setTimeout(function(){if(!w.closed)w.close();},15000);
-  toast('Addition imprimée (aperçu)','s');
+  if(viaNatif){
+    Promise.resolve(imprimerSilencieux(html,format)).then(function(r){
+      if(r&&r.success===false){
+        toast('❌ Échec impression addition : '+(r.error||'erreur inconnue'),'e');
+      }else{
+        toast('Addition envoyée à l\'imprimante ('+format+')','s');
+      }
+    }).catch(function(e){
+      toast('❌ Échec impression addition : '+(e&&e.message?e.message:e),'e');
+    });
+  }else{
+    var w=window.open('','_blank','width=380,height=600');
+    w.document.write(html);w.document.close();
+    w.onafterprint=function(){w.close();};
+    setTimeout(function(){w.print();},400);
+    setTimeout(function(){if(!w.closed)w.close();},15000);
+    toast('Addition imprimée (aperçu)','s');
+  }
 }
 function imprimerSilencieux(html,format){
   // format : '58mm' ou '80mm' — utilisé uniquement par le pont natif Android (choix du rouleau
