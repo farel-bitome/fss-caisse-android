@@ -182,7 +182,8 @@
               'Libs natives trouvées (' + (diag.nativeLibraryDir || '?') + ') :\n' +
               JSON.stringify(diag.nativeLibs || [], null, 0) + '\n' +
               'Contenu de /files (racine) :\n' + JSON.stringify(diag.topLevelFilesDir || [], null, 0) + '\n' +
-              'main.js trouvé sur le disque :\n' + JSON.stringify(diag.mainJsFound || [], null, 2);
+              'main.js trouvé sur le disque :\n' + JSON.stringify(diag.mainJsFound || [], null, 2) + '\n' +
+              'Arbre node_modules (chemins critiques) :\n' + JSON.stringify(diag.nodeModulesTree || [], null, 2);
             // Journal du plugin natif nodejs-mobile-cordova lui-même (pluginInitialize,
             // asyncInit, copyNodeJSAssets, execute) — existe même quand main.js n'a JAMAIS pu
             // démarrer (ex : extraction des assets qui plante avant d'atteindre main.js), donc

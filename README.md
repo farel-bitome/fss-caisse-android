@@ -245,6 +245,26 @@ appliqué aux dépendances actuellement commitées (18 paquets concernés : `eng
 dépendances de `nodejs-project`** (son `node_modules` est commité tel quel dans le dépôt et
 embarqué directement dans l'APK — il n'y a pas de `npm install` pour lui en CI).
 
+### Si l'erreur "Cannot find module .../engine.io/build/engine.io.js" persiste malgré tout
+
+Un fichier peut, en théorie, être copié "avec succès" par `NodeJS.java` (aucune exception) sans
+pour autant finir présent sur le disque à l'endroit attendu, si le plugin retombe silencieusement
+sur l'énumération directe des assets Android (`assetManager.list()`) plutôt que sur `file.list` —
+un mode de repli explicitement documenté comme peu fiable sur les arbres à beaucoup de fichiers
+(c'est la raison d'être de `scripts/generate-node-asset-lists.js`). `scripts/patch-nodejs-plugin-diagnostics.js`
+journalise maintenant explicitement, dans `native-plugin.log` :
+- si `file.list`/`dir.list` sont lus avec succès au runtime (nombre d'entrées) ou si le plugin
+  retombe sur l'énumération directe (peu fiable) ;
+- chaque fichier dont la copie échoue individuellement (au lieu qu'une seule erreur masque les
+  autres) ;
+- l'existence et la taille exactes de `node_modules/engine.io/build/engine.io.js` juste après la
+  copie.
+
+Le même écran de diagnostic (`FssNativeBridge.getNodeDiagnostics()` → section "Arbre
+node_modules") vérifie aussi, indépendamment, l'état réel sur le disque de `node_modules`,
+`node_modules/engine.io`, son sous-dossier `build/` et les fichiers clés de `socket.io` — de quoi
+localiser immédiatement à quel niveau précis l'arborescence s'arrête si le souci revient.
+
 ## Limites connues / à trancher
 
 - **`openBackupFileDialog`** (restauration manuelle d'une sauvegarde) : pas de sélecteur de

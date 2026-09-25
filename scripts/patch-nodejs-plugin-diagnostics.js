@@ -250,6 +250,85 @@ replaceOnce(
   'entrée de execute()'
 );
 
+// 6) copyNodeJSAssets() : journalise EXPLICITEMENT si la copie utilise file.list/dir.list (rapide,
+//    fiable) ou retombe sur l'énumération directe des assets Android via assetManager.list()
+//    (lente, et documentée comme peu fiable sur les arbres avec beaucoup de fichiers — c'est
+//    justement pour l'éviter que scripts/generate-node-asset-lists.js existe). Si file.list est
+//    illisible ou vide au runtime pour une raison quelconque, ce log le dira sans ambiguïté,
+//    plutôt que de laisser deviner pourquoi certains fichiers copiés "avec succès" manquent
+//    ensuite à l'appel pour Node (ex: node_modules/engine.io/build/engine.io.js).
+replaceOnce(
+  '    // Load the nodejs project\'s folders and files lists\n' +
+  '    ArrayList<String> dirs = readFileFromAssets("dir.list");\n' +
+  '    ArrayList<String> files = readFileFromAssets("file.list");\n' +
+  '\n' +
+  '    // Copy the node project files to the project working folder\n' +
+  '    if (files.size() > 0) {\n' +
+  '      Log.d(LOGTAG, "Copying node project assets using the files list");\n' +
+  '\n' +
+  '      for (String dir : dirs) {\n' +
+  '        new File(NodeJS.filesDir + "/" + dir).mkdirs();\n' +
+  '      }\n' +
+  '\n' +
+  '      for (String file : files) {\n' +
+  '        String src = file;\n' +
+  '        String dest = NodeJS.filesDir + "/" + file;\n' +
+  '        NodeJS.copyAssetFile(src, dest);\n' +
+  '      }\n' +
+  '    } else {\n' +
+  '      Log.d(LOGTAG, "Copying node project assets enumerating the APK assets folder");\n' +
+  '      copyFolder(PROJECT_ROOT);\n' +
+  '    }',
+  '    // Load the nodejs project\'s folders and files lists\n' +
+  '    ArrayList<String> dirs = readFileFromAssets("dir.list");\n' +
+  '    ArrayList<String> files = readFileFromAssets("file.list");\n' +
+  '    fssDiagLog("copyNodeJSAssets: dir.list=" + dirs.size() + " entrees, file.list=" + files.size() + " entrees.");\n' +
+  '\n' +
+  '    // Copy the node project files to the project working folder\n' +
+  '    if (files.size() > 0) {\n' +
+  '      fssDiagLog("copyNodeJSAssets: copie via file.list/dir.list (chemin fiable).");\n' +
+  '      Log.d(LOGTAG, "Copying node project assets using the files list");\n' +
+  '\n' +
+  '      for (String dir : dirs) {\n' +
+  '        new File(NodeJS.filesDir + "/" + dir).mkdirs();\n' +
+  '      }\n' +
+  '\n' +
+  '      int fssCopyErrors = 0;\n' +
+  '      IOException fssFirstCopyError = null;\n' +
+  '      for (String file : files) {\n' +
+  '        String src = file;\n' +
+  '        String dest = NodeJS.filesDir + "/" + file;\n' +
+  '        try {\n' +
+  '          NodeJS.copyAssetFile(src, dest);\n' +
+  '        } catch (IOException copyErr) {\n' +
+  '          // Avant ce correctif, une SEULE IOException ici interrompait toute la boucle (donc\n' +
+  '          // toute la copie) sans dire quels autres fichiers posaient aussi probleme. On\n' +
+  '          // journalise CHAQUE fichier fautif et on continue la boucle jusqu\'au bout, pour\n' +
+  '          // avoir la liste complete en un seul essai au lieu de decouvrir les echecs un par\n' +
+  '          // un a chaque nouveau build. L\'erreur (la premiere rencontree) est quand meme\n' +
+  '          // relevee a la fin, une fois la boucle terminee, pour ne pas masquer un vrai echec.\n' +
+  '          fssCopyErrors++;\n' +
+  '          fssDiagLog("copyNodeJSAssets: ECHEC copie de \'" + file + "\' : " + copyErr);\n' +
+  '          if (fssFirstCopyError == null) fssFirstCopyError = copyErr;\n' +
+  '        }\n' +
+  '      }\n' +
+  '      fssDiagLog("copyNodeJSAssets: copie terminee via file.list (" + files.size() + " fichiers, " + fssCopyErrors + " echec(s)).");\n' +
+  '      if (fssFirstCopyError != null) {\n' +
+  '        throw fssFirstCopyError;\n' +
+  '      }\n' +
+  '      // Verification cible, immediatement apres la copie : le fichier qui posait probleme\n' +
+  '      // (engine.io/build/engine.io.js) existe-t-il reellement sur le disque a cet instant,\n' +
+  '      // et avec quelle taille ? Reponse directe, sans avoir a deviner.\n' +
+  '      File fssCheck = new File(NodeJS.filesDir + "/" + PROJECT_ROOT + "/node_modules/engine.io/build/engine.io.js");\n' +
+  '      fssDiagLog("copyNodeJSAssets: verification engine.io/build/engine.io.js -> existe=" + fssCheck.exists() + ", taille=" + (fssCheck.exists() ? fssCheck.length() : -1));\n' +
+  '    } else {\n' +
+  '      fssDiagLog("copyNodeJSAssets: file.list VIDE OU ILLISIBLE -> repli sur l\'enumeration directe des assets (assetManager.list), connue pour etre peu fiable sur les arbres avec beaucoup de fichiers.");\n' +
+  '      Log.d(LOGTAG, "Copying node project assets enumerating the APK assets folder");\n' +
+  '      copyFolder(PROJECT_ROOT);\n' +
+  '    }',
+  'corps copie file.list/dir.list de copyNodeJSAssets()'
+);
+
 if (src === original) {
   throw new Error('Aucune modification appliquée — vérifier les ancrages.');
 }

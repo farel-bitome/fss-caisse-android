@@ -505,10 +505,67 @@ public class FssNativeBridge {
             }
             r.put("topLevelFilesDir", topLevelFilesDir);
             r.put("mainJsFound", mainJsFound);
+
+            // 3) Inspection ciblée de l'arbre node_modules réellement présent sur le disque du
+            // TPE, précisément là où l'extraction est censée avoir eu lieu
+            // (filesDir/www/nodejs-project/node_modules — voir NodeJS.java : PROJECT_ROOT =
+            // "www/nodejs-project"). Sert à localiser exactement où l'arbre s'arrête quand un
+            // require() échoue avec "Cannot find module" malgré une extraction réussie sans
+            // exception : le dossier node_modules lui-même existe-t-il ? engine.io/ ? son
+            // sous-dossier build/ ? le fichier engine.io.js exact, et avec quelle taille ?
+            r.put("nodeModulesTree", inspectCriticalPaths(context.getFilesDir()));
         } catch (Exception e) {
             try { r.put("error", e.getMessage()); } catch (Exception ignored) {}
         }
         return r;
+    }
+
+    /**
+     * Inspecte une liste de chemins précis, chacun relatif à filesDir, et rapporte pour chacun :
+     * s'il existe, si c'est un dossier ou un fichier, sa taille (fichier) ou le nombre d'entrées
+     * + un aperçu de ses 40 premiers noms (dossier). Permet de localiser précisément à quel
+     * niveau de l'arborescence node_modules l'extraction s'arrête, sans avoir à deviner.
+     */
+    private JSONArray inspectCriticalPaths(File filesDir) {
+        JSONArray out = new JSONArray();
+        String[] relPaths = new String[]{
+                "www/nodejs-project/node_modules",
+                "www/nodejs-project/node_modules/engine.io",
+                "www/nodejs-project/node_modules/engine.io/build",
+                "www/nodejs-project/node_modules/engine.io/build/engine.io.js",
+                "www/nodejs-project/node_modules/engine.io/package.json",
+                "www/nodejs-project/node_modules/socket.io",
+                "www/nodejs-project/node_modules/socket.io/package.json",
+                "www/nodejs-project/node_modules/socket.io/dist/index.js"
+        };
+        for (String rel : relPaths) {
+            JSONObject entry = new JSONObject();
+            try {
+                entry.put("path", rel);
+                File f = new File(filesDir, rel);
+                boolean exists = f.exists();
+                entry.put("existe", exists);
+                if (exists) {
+                    entry.put("estDossier", f.isDirectory());
+                    if (f.isDirectory()) {
+                        String[] children = f.list();
+                        entry.put("nbEntrees", children == null ? -1 : children.length);
+                        JSONArray preview = new JSONArray();
+                        if (children != null) {
+                            java.util.Arrays.sort(children);
+                            for (int i = 0; i < Math.min(children.length, 40); i++) preview.put(children[i]);
+                        }
+                        entry.put("apercu", preview);
+                    } else {
+                        entry.put("taille", f.length());
+                    }
+                }
+            } catch (Exception e) {
+                try { entry.put("erreur", e.getMessage()); } catch (Exception ignored) {}
+            }
+            out.put(entry);
+        }
+        return out;
     }
 
     private void findMainJsRecursive(File dir, int depth, int maxDepth, JSONArray out) {
