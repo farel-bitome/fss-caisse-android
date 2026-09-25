@@ -264,7 +264,9 @@ public class FssNativeBridge {
                 break;
             }
             case "printSilent": {
-                doPrint(args.optString("html", ""), callbackId);
+                String format = args.optString("format", "80mm");
+                int widthPx = "58mm".equals(format) ? 384 : 576; // 203dpi : 58mm≈384px, 80mm≈576px
+                doPrint(args.optString("html", ""), widthPx, callbackId);
                 break;
             }
             case "saveFileDialog": {
@@ -297,9 +299,9 @@ public class FssNativeBridge {
     // ---------------------------------------------------------------------------------------
     // Impression : rend le HTML du ticket en bitmap puis l'envoie au driver du fabricant du TPE.
     // ---------------------------------------------------------------------------------------
-    private void doPrint(String html, String callbackId) {
+    private void doPrint(String html, int widthPx, String callbackId) {
         final PrinterDriver driver = PrinterDriverFactory.get(context);
-        HtmlToBitmap.render(context, html, 384, new HtmlToBitmap.Callback() {
+        HtmlToBitmap.render(context, html, widthPx, new HtmlToBitmap.Callback() {
             @Override
             public void onBitmap(final Bitmap bitmap) {
                 driver.printBitmap(bitmap, new PrinterDriver.Callback() {

@@ -247,7 +247,8 @@
       });
     },
     getCurrentServer: function () { return call('getCurrentServer', {}).then(function (r) { return r && r.url; }); },
-    printSilent: function (html) { return call('printSilent', { html: html }); },
+    // format : '58mm' ou '80mm' (défaut '80mm' si omis, pour compat avec les appels existants).
+    printSilent: function (html, format) { return call('printSilent', { html: html, format: format || '80mm' }); },
     getServerIpInfo: function () { return call('getServerIpInfo', {}); },
     saveManualIp: function (ip, port) { return call('saveManualIp', { ip: ip, port: port }); },
     resetManualIp: function () { return call('resetManualIp', {}); },

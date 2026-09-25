@@ -79,8 +79,7 @@ public class AndroidSystemPrinterDriver implements PrinterDriver {
                                         "FSS-CAISSE",
                                         adapter,
                                         new PrintAttributes.Builder()
-                                                .setMediaSize(new PrintAttributes.MediaSize(
-                                                        "FSS58", "Ticket 58 mm", 2283, 11690))
+                                                .setMediaSize(mediaSizeFor(bitmap.getWidth()))
                                                 .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
                                                 .build()
                                 );
@@ -99,13 +98,44 @@ public class AndroidSystemPrinterDriver implements PrinterDriver {
         });
     }
 
+    /**
+     * Détermine le format de page à partir de la largeur réelle du bitmap rendu (voir
+     * HtmlToBitmap : 384px ≈ 58mm, 576px ≈ 80mm à 203dpi) plutôt que de figer 58mm en dur — sinon
+     * un ticket rendu en 80mm (choix fait dans l'app) serait tronqué/déformé sur ce driver de
+     * secours. Pour une largeur inattendue (autre TPE/DPI), on calcule le format proportionnellement
+     * plutôt que de retomber sur une valeur arbitraire.
+     */
+    private PrintAttributes.MediaSize mediaSizeFor(int bitmapWidthPx) {
+        if (bitmapWidthPx <= 0) bitmapWidthPx = 384;
+        if (Math.abs(bitmapWidthPx - 384) <= 32) {
+            return new PrintAttributes.MediaSize("FSS58", "Ticket 58 mm", 2283, 11690);
+        }
+        if (Math.abs(bitmapWidthPx - 576) <= 32) {
+            return new PrintAttributes.MediaSize("FSS80", "Ticket 80 mm", 3150, 11690);
+        }
+        // Largeur non standard (autre TPE/DPI) : on déduit la largeur papier en mils en
+        // supposant ~203dpi (standard quasi universel des imprimantes thermiques de TPE),
+        // pour rester correct même sur du matériel non prévu explicitement ci-dessus.
+        int widthMils = (int) Math.round(bitmapWidthPx / 203.0 * 1000);
+        return new PrintAttributes.MediaSize("FSS_AUTO", "Ticket " + widthMils + "mils", widthMils, 11690);
+    }
+
     private String buildHtml(Bitmap bitmap) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
         String b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+        // La largeur d'affichage de l'image suit le format réel (58mm/80mm), calculée à partir
+        // de la même hypothèse ~203dpi que mediaSizeFor(), avec une petite marge (4mm) de chaque
+        // côté pour rester dans la zone imprimable de la page choisie.
+        double widthMm = bitmap.getWidth() / 203.0 * 25.4;
+        double imgWidthMm = Math.max(10, widthMm - 4);
         return "<html><head><meta charset=\"utf-8\"><style>"
-                + "@page{size:58mm auto;margin:0}body{margin:0;padding:0}"
-                + "img{display:block;width:48mm;margin:2mm auto;image-rendering:pixelated}"
+                + "@page{size:" + fmt(widthMm) + "mm auto;margin:0}body{margin:0;padding:0}"
+                + "img{display:block;width:" + fmt(imgWidthMm) + "mm;margin:2mm auto;image-rendering:pixelated}"
                 + "</style></head><body><img src=\"data:image/png;base64," + b64 + "\"></body></html>";
+    }
+
+    private static String fmt(double mm) {
+        return String.format(java.util.Locale.US, "%.1f", mm);
     }
 }

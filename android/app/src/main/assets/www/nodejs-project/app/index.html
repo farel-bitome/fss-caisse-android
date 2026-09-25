@@ -1026,7 +1026,8 @@ ART-001,Regab,Bière,Bouteille,2500,1500,50,10,🍺"></textarea>
   </div>
   <div class="mf" style="gap:8px">
     <button class="btn btn-o" onclick="closeM('ovRecu')">✕ Fermer</button>
-    <button class="btn btn-r" style="flex:1" onclick="imprimerRecu('80mm')">🖨️ Imprimer (80mm)</button>
+    <button class="btn btn-o" style="flex:1" onclick="imprimerRecu('58mm')">🖨️ 58mm</button>
+    <button class="btn btn-r" style="flex:1" onclick="imprimerRecu('80mm')">🖨️ 80mm</button>
   </div>
 </div></div>
 <div id="toasts"></div>
@@ -1701,9 +1702,12 @@ function imprimerAddition(attId,nbParts){
   setTimeout(function(){if(!w.closed)w.close();},15000);
   toast('Addition imprimée (aperçu)','s');
 }
-function imprimerSilencieux(html){
+function imprimerSilencieux(html,format){
+  // format : '58mm' ou '80mm' — utilisé uniquement par le pont natif Android (choix du rouleau
+  // du TPE) ; sur la version bureau/navigateur (fenêtre + window.print()), la largeur est déjà
+  // fixée dans le CSS du ticket lui-même, donc ce paramètre n'a pas d'effet ici.
   if(window.electronAPI&&window.electronAPI.printSilent){
-    window.electronAPI.printSilent(html);
+    window.electronAPI.printSilent(html,format||'80mm');
   }else{
     var w=window.open('','_blank','width=380,height=600');
     w.document.write(html);w.document.close();
@@ -2164,7 +2168,9 @@ function afficherRecu(tk){
   g('recuContent').style.fontWeight='700';
   g('ovRecu').classList.add('on');
 }
-function imprimerRecu(){
+function imprimerRecu(format){
+  // format : '58mm' ou '80mm' (choisi via les boutons de la page de validation du reçu).
+  format=(format==='58mm')?'58mm':'80mm';
   var tk=dernierTicket;if(!tk)return;
   var etab=g('etabNom')?g('etabNom').value:'FSS-CAISSE';
   var adr=g('etabAdr')?g('etabAdr').value:'';
@@ -2175,10 +2181,15 @@ function imprimerRecu(){
   var nowD=new Date();
   var dateStr=nowD.toLocaleDateString('fr-FR');
   var heureStr=nowD.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-  var w=window.open('','_blank','width=420,height=700');
-  var css='@page{size:80mm auto;margin:0}'+
+  // Sur TPE Android (pont natif présent), l'impression passe directement par le driver de
+  // l'imprimante thermique embarquée (Sunmi/H10S/secours système) — pas de fenêtre ni de boîte
+  // de dialogue navigateur, qui ne déclenchent rien sur un TPE. Sur la version bureau/navigateur
+  // (pas de pont natif), on garde l'ancien flux fenêtre + window.print().
+  var viaNatif=!!(window.electronAPI&&window.electronAPI.printSilent);
+  var w=viaNatif?null:window.open('','_blank','width=420,height=700');
+  var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
-    'html,body{width:80mm}'+
+    'html,body{width:'+format+'}'+
     'body{font-family:"Courier New",monospace;font-size:12px;font-weight:700;padding:3mm 4mm}'+
     'table{width:100%;border-collapse:collapse;margin:2px 0}'+
     'td{padding:2px 0;vertical-align:top}'+
@@ -2253,10 +2264,15 @@ function imprimerRecu(){
     copies.push('<div class="'+cls+'">'+prefix+buildBody(ci+1,n)+'</div>');
   }
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>'+copies.join('')+'</body></html>';
-  w.document.write(html);w.document.close();
-  w.onafterprint=function(){w.close();};
-  setTimeout(function(){w.print();},400);
-  setTimeout(function(){if(!w.closed)w.close();},15000);
+  if(viaNatif){
+    imprimerSilencieux(html,format);
+    toast('Ticket envoyé à l\'imprimante ('+format+')','s');
+  }else{
+    w.document.write(html);w.document.close();
+    w.onafterprint=function(){w.close();};
+    setTimeout(function(){w.print();},400);
+    setTimeout(function(){if(!w.closed)w.close();},15000);
+  }
   // Ferme aussi la fenêtre du reçu dans l'application une fois l'impression lancée
   closeM('ovRecu');
 }
