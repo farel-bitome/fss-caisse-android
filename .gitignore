@@ -13,10 +13,18 @@
 *.apk
 *.aab
 
-# Secrets — ne jamais committer le keystore de signature
+# Secrets — ne jamais committer le keystore de signature RELEASE (Play Store), qui doit rester
+# uniquement dans le secret GitHub FSS_KEYSTORE_BASE64 (voir build-android.yml).
 /android/app/fss-release.keystore
 *.keystore
 *.jks
+# EXCEPTION volontaire : fss-debug.keystore N'EST PAS un secret sensible (il ne sert qu'aux APK
+# de test/sideload, jamais au Play Store) et DOIT au contraire être committé — c'est justement en
+# le gardant identique et présent dans le dépôt à chaque build CI qu'une nouvelle APK peut
+# s'installer par-dessus l'ancienne sur les TPE sans perdre les données (voir le commentaire dans
+# android/app/build.gradle). Sans cette ligne, la règle "*.keystore" ci-dessus l'aurait exclu du
+# commit — cause du "Fichier Keystore ... non trouvé" au premier build après son ajout.
+!/android/app/fss-debug.keystore
 
 # Divers
 .DS_Store

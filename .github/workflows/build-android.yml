@@ -125,14 +125,23 @@ jobs:
 
       - name: Extraire l'erreur de compilation (si échec)
         # Par défaut Gradle masque la sortie détaillée — --info la fait apparaître, mais noyée
-        # dans des milliers de lignes. Plutôt que de deviner des mots-clés (qui varient selon
-        # le type d'erreur), on affiche directement la fin du log : c'est systématiquement là
-        # que Gradle imprime "FAILURE: Build failed" suivi de la cause exacte.
+        # dans des milliers de lignes. Un simple "tail -250" s'est révélé INSUFFISANT : avec
+        # --stacktrace, Gradle imprime la trace COMPLÈTE (souvent 200+ lignes de classes internes
+        # org.gradle.internal.*, sans aucun rapport avec la vraie cause) juste après le message
+        # utile — les 250 dernières lignes ne contenaient donc plus que cette trace interne, sans
+        # jamais remonter jusqu'à "* What went wrong:" ni "Caused by:". On cherche maintenant ce
+        # marqueur explicitement et on affiche TOUT à partir de lui (description du problème +
+        # cause exacte, la trace interne peut suivre mais au moins le message utile est présent).
         if: always()
         run: |
           if [ -s /tmp/gradle-debug.log ] && grep -q "BUILD FAILED" /tmp/gradle-debug.log; then
-            echo "===== BUILD FAILED — 250 dernières lignes ====="
-            tail -250 /tmp/gradle-debug.log
+            echo "===== BUILD FAILED ====="
+            if grep -q "What went wrong" /tmp/gradle-debug.log; then
+              awk '/What went wrong/{found=1} found' /tmp/gradle-debug.log | head -300
+            else
+              echo "(marqueur \"What went wrong\" introuvable — 250 dernières lignes en secours)"
+              tail -250 /tmp/gradle-debug.log
+            fi
             echo "===== fin de l'extrait ====="
             exit 1
           fi
