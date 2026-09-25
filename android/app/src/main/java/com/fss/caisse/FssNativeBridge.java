@@ -50,6 +50,10 @@ public class FssNativeBridge {
 
     private final Context context;
     private final WebView webView;
+    // Référence faible vers l'Activity d'origine — utilisée UNIQUEMENT par HtmlToBitmap pour
+    // héberger sa fenêtre de rendu indépendante (voir HtmlToBitmap.render()) ; faible pour ne
+    // jamais retenir l'Activity en mémoire au-delà de sa durée de vie réelle.
+    private final java.lang.ref.WeakReference<android.app.Activity> activityRef;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService bg = Executors.newCachedThreadPool();
     private final Licensing licensing;
@@ -57,6 +61,8 @@ public class FssNativeBridge {
     public FssNativeBridge(Context context, WebView webView) {
         this.context = context.getApplicationContext();
         this.webView = webView;
+        this.activityRef = new java.lang.ref.WeakReference<>(
+                context instanceof android.app.Activity ? (android.app.Activity) context : null);
         this.licensing = new Licensing(this.context);
     }
 
@@ -333,8 +339,14 @@ public class FssNativeBridge {
         // entièrement blanc — permet de renvoyer un avertissement explicite au JS même quand le
         // driver imprimante répond "succès" (il a bien reçu et imprimé l'image... qui était vide
         // dès le rendu). Sans ça, "impression réussie" masquait un ticket blanc sorti du rendu.
+        android.app.Activity activity = activityRef.get();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            respond(callbackId, error("Impossible d'imprimer : la fenêtre principale de l'application "
+                    + "n'est plus disponible (réessayez depuis l'écran principal)."));
+            return;
+        }
         final boolean[] suspectBlank = {false};
-        HtmlToBitmap.render(context, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
+        HtmlToBitmap.render(activity, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
             @Override
             public void onSuspectBlank() {
                 suspectBlank[0] = true;

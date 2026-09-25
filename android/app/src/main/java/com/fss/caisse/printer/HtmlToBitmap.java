@@ -1,27 +1,24 @@
 package com.fss.caisse.printer;
 
+import android.app.Activity;
+import android.app.Dialog;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.pdf.PdfRenderer;
-import android.os.Bundle;
-import android.os.CancellationSignal;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.ParcelFileDescriptor;
-import android.print.PageRange;
-import android.print.PrintAttributes;
-import android.print.PrintDocumentAdapter;
-import android.print.PrintDocumentInfo;
 import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewTreeObserver;
+import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
-
-import java.io.File;
 
 /**
  * Convertit le HTML du ticket (généré côté JS, identique à celui utilisé sur la version bureau)
@@ -32,30 +29,37 @@ import java.io.File;
  * Largeur par défaut : 384px, qui correspond à un rouleau 58mm à 203dpi (format le plus courant
  * sur les TPE portables Sunmi/H10S). Passer 576 pour du 80mm.
  *
- * MÉTHODE — alignée sur celle qui a fait ses preuves dans FSS-CALCUL (même éditeur, mêmes
- * terminaux Sunmi et Senraise H10S, même besoin exact : transformer un ticket en bitmap pour les
- * SDK imprimante) : la première version de cette classe dessinait "à la main" une WebView dans un
- * Canvas (WebView#draw), une technique fragile qui exige que la vue soit à la fois attachée à une
- * fenêtre réelle ET conserve la bonne taille jusqu'à la capture. Comme cette fenêtre est celle,
- * TOUJOURS ACTIVE, de l'appli entière, une repasse de layout du système déclenchée entretemps par
- * le reste de l'interface pouvait annuler la taille qu'on venait de fixer — d'où des tickets sortis
- * blancs malgré plusieurs correctifs successifs.
+ * HISTORIQUE (important pour ne pas reproduire les mêmes erreurs) :
  *
- * On passe maintenant par le pipeline d'impression OFFICIEL d'Android
- * (WebView#createPrintDocumentAdapter), le même que celui déjà utilisé par le secours "impression
- * système" de FSS-CAISSE (AndroidSystemPrinterDriver) ET par FSS-CALCUL pour son propre secours
- * Android : il génère un vrai PDF à partir du HTML, en s'appuyant sur le moteur de rendu interne
- * de la WebView, INDÉPENDAMMENT de tout attachement à une fenêtre visible ou de toute repasse de
- * layout système. On rasterise ensuite ce PDF en bitmap avec PdfRenderer (API Android standard).
- * Le CSS de chaque ticket (@page{size:Xmm auto}) garantit que le PDF produit tient sur une seule
- * page, à la largeur voulue.
+ * 1) Première version : la WebView était attachée directement à la fenêtre DÉCOR de l'Activity
+ *    principale (celle, toujours active, de toute l'interface de l'appli) avant d'être dessinée
+ *    dans un Canvas. Problème : cette fenêtre est PARTAGÉE avec tout le reste de l'UI — une
+ *    repasse de layout du système déclenchée entretemps par le reste de l'interface pouvait
+ *    annuler la taille qu'on venait de fixer à la WebView de rendu, d'où des tickets sortis
+ *    blancs de façon intermittente malgré plusieurs correctifs successifs sur les LayoutParams.
+ *
+ * 2) Tentative de contournement via le pipeline OFFICIEL d'impression Android
+ *    (WebView#createPrintDocumentAdapter, puis appel manuel de adapter.onLayout()/onWrite() pour
+ *    fabriquer un PDF, rasterisé ensuite via PdfRenderer). Cette piste s'est révélée IMPOSSIBLE À
+ *    COMPILER : PrintDocumentAdapter.LayoutResultCallback et .WriteResultCallback n'ont PAS de
+ *    constructeur public — seul le framework d'impression système (PrintManager, PrintSpooler)
+ *    peut créer ces objets et les transmettre à onLayout()/onWrite(). Une appli ne peut donc PAS
+ *    piloter elle-même cet adaptateur pour produire un PDF en silence ; elle ne peut l'utiliser
+ *    qu'en le confiant à PrintManager.print(...), ce qui affiche la boîte de dialogue système —
+ *    exactement ce que fait déjà AndroidSystemPrinterDriver (le secours universel), mais ça ne
+ *    convient pas à une impression AUTOMATIQUE et silencieuse sur un TPE.
+ *
+ * 3) Solution retenue ICI : revenir à la capture directe WebView -> Canvas (comme dans la version
+ *    1), mais en corrigeant la VRAIE cause du bug — l'attachement à la fenêtre partagée de
+ *    l'Activity. La WebView de rendu est maintenant hébergée dans sa PROPRE fenêtre indépendante
+ *    (un Dialog dédié, positionné hors-écran et totalement invisible/non interactif), qui ne
+ *    subit donc AUCUNE repasse de layout provoquée par le reste de l'interface. On attend en plus
+ *    un vrai événement de layout terminé (ViewTreeObserver) avant de dessiner, au lieu de se fier
+ *    à un délai arbitraire.
  */
 public class HtmlToBitmap {
 
     private static final String TAG = "FSS-HtmlToBitmap";
-
-    /** Résolution standard des imprimantes thermiques utilisées sur ces TPE. */
-    private static final int DPI = 203;
 
     public interface Callback {
         void onBitmap(Bitmap bitmap);
@@ -69,15 +73,29 @@ public class HtmlToBitmap {
         default void onSuspectBlank() {}
     }
 
+    /**
+     * @param context N'importe quel Context ; DOIT permettre de remonter jusqu'à une Activity
+     *                 vivante (voir findActivity ci-dessous) — une fenêtre de rendu indépendante
+     *                 ne peut être créée que rattachée à une Activity, pas à un simple contexte
+     *                 applicatif. En pratique, on passe toujours ici la WebView principale de
+     *                 l'appli ou son contexte (voir FssNativeBridge.doPrint()).
+     */
     public static void render(Context context, String html, int widthPx, @NonNull Callback callback) {
-        final Context appContext = context.getApplicationContext();
-        Handler main = new Handler(Looper.getMainLooper());
+        Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
         main.post(() -> {
+            Activity activity = findActivity(context);
+            if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+                callback.onError("Impossible de préparer l'impression : aucune fenêtre active pour le rendu du ticket.");
+                return;
+            }
             try {
-                WebView webView = new WebView(appContext);
+                WebView webView = new WebView(activity);
                 webView.getSettings().setJavaScriptEnabled(false);
                 webView.getSettings().setLoadWithOverviewMode(true);
                 webView.getSettings().setUseWideViewPort(false);
+                // Rendu logiciel : plus fiable pour un dessin manuel dans un Canvas hors écran
+                // que le rendu matériel (qui peut produire un bitmap vide sur certains TPE).
+                webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
                 webView.setWebViewClient(new WebViewClient() {
                     // IMPORTANT — sans ce recouvrement, si le processus de rendu partagé par TOUTES
                     // les WebViews de l'appli plante, le comportement PAR DÉFAUT d'Android est de
@@ -97,7 +115,7 @@ public class HtmlToBitmap {
 
                     @Override
                     public void onPageFinished(WebView view, String url) {
-                        renderToPdfThenBitmap(appContext, view, widthPx, callback);
+                        captureInOwnWindow(activity, view, widthPx, callback);
                     }
                 });
                 webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
@@ -107,155 +125,88 @@ public class HtmlToBitmap {
         });
     }
 
-    private static void renderToPdfThenBitmap(Context context, WebView webView, int widthPx, Callback callback) {
-        File pdfFile;
+    /**
+     * Héberge la WebView dans une fenêtre Dialog totalement indépendante de celle de l'Activité
+     * (invisible, hors-écran, ni tactile ni focusable) puis attend un VRAI événement de layout
+     * terminé — pas un simple délai arbitraire — avant de dessiner le contenu dans un bitmap.
+     * Comme cette fenêtre n'appartient qu'à ce rendu et à rien d'autre dans l'appli, aucune
+     * repasse de layout déclenchée par le reste de l'interface ne peut plus jamais lui faire
+     * perdre sa taille avant la capture (c'était la cause du bug "ticket blanc" historique).
+     */
+    private static void captureInOwnWindow(Activity activity, WebView webView, int widthPx, Callback callback) {
         try {
-            pdfFile = File.createTempFile("fss-ticket-", ".pdf", context.getCacheDir());
+            Dialog dialog = new Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar);
+            dialog.setCancelable(false);
+            FrameLayout container = new FrameLayout(activity);
+            container.addView(webView, new FrameLayout.LayoutParams(widthPx, FrameLayout.LayoutParams.WRAP_CONTENT));
+            dialog.setContentView(container);
+
+            Window window = dialog.getWindow();
+            if (window != null) {
+                window.setLayout(widthPx, WindowManager.LayoutParams.WRAP_CONTENT);
+                window.setGravity(Gravity.TOP | Gravity.START);
+                window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+                WindowManager.LayoutParams attrs = window.getAttributes();
+                // Très loin hors de l'écran plutôt qu'à taille nulle : certains fabricants
+                // annulent silencieusement le rendu d'une fenêtre de taille 0x0.
+                attrs.x = -10000;
+                attrs.y = -10000;
+                window.setAttributes(attrs);
+            }
+
+            dialog.show();
+
+            final boolean[] captured = {false};
+            webView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override
+                public void onGlobalLayout() {
+                    if (captured[0]) return;
+                    if (webView.getWidth() <= 0 || webView.getHeight() <= 0) return;
+                    captured[0] = true;
+                    try { webView.getViewTreeObserver().removeOnGlobalLayoutListener(this); } catch (Exception ignored) {}
+                    // Un post() supplémentaire laisse le passage de DESSIN (pas seulement de
+                    // layout) du système se terminer avant qu'on capture le Canvas nous-mêmes.
+                    webView.post(() -> finishCapture(dialog, webView, widthPx, callback));
+                }
+            });
         } catch (Exception e) {
             try { webView.destroy(); } catch (Exception ignored) {}
-            callback.onError("Impossible de créer le fichier temporaire du ticket : " + e.getMessage());
-            return;
-        }
-
-        try {
-            // px -> mils (millièmes de pouce), unité attendue par PrintAttributes.MediaSize.
-            int widthMils = Math.round(widthPx * 1000f / DPI);
-            // Hauteur "plafond" très généreuse (~1,27 m) : le CSS de chaque ticket fixe déjà
-            // @page{size:Xmm auto}, donc le moteur de rendu calcule lui-même la hauteur réelle du
-            // contenu — cette valeur n'est qu'une limite haute, jamais atteinte en pratique.
-            int heightMils = 50000;
-
-            PrintAttributes attrs = new PrintAttributes.Builder()
-                    .setMediaSize(new PrintAttributes.MediaSize("fss_ticket", "Ticket FSS-CAISSE", widthMils, heightMils))
-                    .setResolution(new PrintAttributes.Resolution("fss_dpi", "Ticket", DPI, DPI))
-                    .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
-                    .build();
-
-            PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter("fss-ticket");
-
-            adapter.onLayout(null, attrs, new CancellationSignal(), new PrintDocumentAdapter.LayoutResultCallback() {
-                @Override
-                public void onLayoutFinished(PrintDocumentInfo info, boolean changed) {
-                    writePdf(adapter, pdfFile, webView, widthPx, callback);
-                }
-
-                @Override
-                public void onLayoutFailed(CharSequence error) {
-                    cleanup(webView, pdfFile);
-                    callback.onError("Échec de mise en page du ticket : " + error);
-                }
-
-                @Override
-                public void onLayoutCancelled() {
-                    cleanup(webView, pdfFile);
-                    callback.onError("Mise en page du ticket annulée.");
-                }
-            }, new Bundle());
-        } catch (Exception e) {
-            cleanup(webView, pdfFile);
-            callback.onError("Erreur lors de la génération du PDF du ticket : " + e.getMessage());
+            callback.onError("Impossible de préparer la fenêtre de rendu du ticket : " + e.getMessage());
         }
     }
 
-    private static void writePdf(PrintDocumentAdapter adapter, File pdfFile, WebView webView, int widthPx, Callback callback) {
-        ParcelFileDescriptor pfd;
+    private static void finishCapture(Dialog dialog, WebView webView, int widthPx, Callback callback) {
         try {
-            pfd = ParcelFileDescriptor.open(pdfFile,
-                    ParcelFileDescriptor.MODE_READ_WRITE | ParcelFileDescriptor.MODE_TRUNCATE);
+            int height = Math.max(1, webView.getHeight());
+            Bitmap bitmap = Bitmap.createBitmap(widthPx, height, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            canvas.drawColor(Color.WHITE);
+            webView.draw(canvas);
+            if (looksBlank(bitmap)) {
+                Log.w(TAG, "Bitmap de ticket rendu mais quasi entièrement blanc ("
+                        + bitmap.getWidth() + "x" + bitmap.getHeight() + "px).");
+                try { callback.onSuspectBlank(); } catch (Exception ignored) {}
+            }
+            callback.onBitmap(bitmap);
         } catch (Exception e) {
-            cleanup(webView, pdfFile);
-            callback.onError("Impossible d'ouvrir le fichier temporaire du ticket : " + e.getMessage());
-            return;
-        }
-        try {
-            adapter.onWrite(new PageRange[]{PageRange.ALL_PAGES}, pfd, new CancellationSignal(),
-                    new PrintDocumentAdapter.WriteResultCallback() {
-                        @Override
-                        public void onWriteFinished(PageRange[] pages) {
-                            try { pfd.close(); } catch (Exception ignored) {}
-                            try {
-                                Bitmap bitmap = rasterizePdf(pdfFile, widthPx);
-                                if (looksBlank(bitmap)) {
-                                    Log.w(TAG, "Bitmap de ticket rendu mais quasi entièrement blanc "
-                                            + "(" + bitmap.getWidth() + "x" + bitmap.getHeight() + "px).");
-                                    try { callback.onSuspectBlank(); } catch (Exception ignored2) {}
-                                }
-                                callback.onBitmap(bitmap);
-                            } catch (Exception e) {
-                                callback.onError("Erreur de rasterisation du ticket : " + e.getMessage());
-                            } finally {
-                                cleanup(webView, pdfFile);
-                            }
-                        }
-
-                        @Override
-                        public void onWriteFailed(CharSequence error) {
-                            try { pfd.close(); } catch (Exception ignored) {}
-                            cleanup(webView, pdfFile);
-                            callback.onError("Échec d'écriture du PDF du ticket : " + error);
-                        }
-
-                        @Override
-                        public void onWriteCancelled() {
-                            try { pfd.close(); } catch (Exception ignored) {}
-                            cleanup(webView, pdfFile);
-                            callback.onError("Écriture du ticket annulée.");
-                        }
-                    });
-        } catch (Exception e) {
-            try { pfd.close(); } catch (Exception ignored) {}
-            cleanup(webView, pdfFile);
-            callback.onError("Erreur lors de l'écriture du PDF du ticket : " + e.getMessage());
+            callback.onError("Erreur lors de la capture du ticket : " + e.getMessage());
+        } finally {
+            try { dialog.dismiss(); } catch (Exception ignored) {}
+            try { webView.destroy(); } catch (Exception ignored) {}
         }
     }
 
-    private static void cleanup(WebView webView, File pdfFile) {
-        try { webView.destroy(); } catch (Exception ignored) {}
-        try { if (pdfFile != null) pdfFile.delete(); } catch (Exception ignored) {}
-    }
-
-    /**
-     * Ouvre le PDF généré par le pipeline d'impression et le transforme en bitmap à la largeur
-     * voulue. Un ticket normal tient sur une seule page grâce à @page{size:Xmm auto} dans le CSS ;
-     * si le contenu déborde malgré tout sur plusieurs pages, on les empile verticalement plutôt
-     * que de perdre silencieusement la suite du ticket.
-     */
-    private static Bitmap rasterizePdf(File pdfFile, int widthPx) throws Exception {
-        try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
-             PdfRenderer renderer = new PdfRenderer(pfd)) {
-            int pageCount = renderer.getPageCount();
-            if (pageCount <= 0) {
-                throw new IllegalStateException("PDF généré vide (aucune page) — le rendu du ticket a échoué.");
-            }
-            Bitmap[] pageBitmaps = new Bitmap[pageCount];
-            int totalHeight = 0;
-            for (int i = 0; i < pageCount; i++) {
-                PdfRenderer.Page page = renderer.openPage(i);
-                try {
-                    float scale = widthPx / (float) page.getWidth();
-                    int h = Math.max(1, Math.round(page.getHeight() * scale));
-                    Bitmap pageBitmap = Bitmap.createBitmap(widthPx, h, Bitmap.Config.ARGB_8888);
-                    Canvas c = new Canvas(pageBitmap);
-                    c.drawColor(Color.WHITE);
-                    page.render(pageBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT);
-                    pageBitmaps[i] = pageBitmap;
-                    totalHeight += h;
-                } finally {
-                    page.close();
-                }
-            }
-            if (pageCount == 1) return pageBitmaps[0];
-            Bitmap combined = Bitmap.createBitmap(widthPx, totalHeight, Bitmap.Config.ARGB_8888);
-            Canvas cc = new Canvas(combined);
-            cc.drawColor(Color.WHITE);
-            int y = 0;
-            for (Bitmap pb : pageBitmaps) {
-                cc.drawBitmap(pb, 0, y, null);
-                y += pb.getHeight();
-                pb.recycle();
-            }
-            return combined;
+    /** Remonte la chaîne des ContextWrapper pour retrouver l'Activity sous-jacente, s'il y en a une. */
+    private static Activity findActivity(Context context) {
+        Context c = context;
+        while (c instanceof ContextWrapper) {
+            if (c instanceof Activity) return (Activity) c;
+            c = ((ContextWrapper) c).getBaseContext();
         }
+        return (c instanceof Activity) ? (Activity) c : null;
     }
 
     /**
