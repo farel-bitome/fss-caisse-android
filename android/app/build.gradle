@@ -26,8 +26,21 @@ android {
         applicationId "com.fss.caisse"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // IMPORTANT — mise à jour en place sans perte de données (reçus, articles, tables,
+        // clôtures... tout ce qui vit dans fss-data/ et les SharedPreferences) :
+        // Android ne conserve les données de l'appli lors de l'installation d'une nouvelle APK
+        // PAR-DESSUS l'ancienne que si DEUX conditions sont réunies à la fois :
+        //   1) le même applicationId (ci-dessus, déjà stable : "com.fss.caisse") ;
+        //   2) la nouvelle APK est signée avec EXACTEMENT le même certificat que celle déjà
+        //      installée sur le TPE. Un certificat différent fait échouer l'installation
+        //      ("conflicts with an existing package") et oblige à désinstaller l'ancienne
+        //      version avant d'installer la nouvelle — ce qui efface tout.
+        // Le numéro de version doit aussi être STRICTEMENT croissant à chaque publication, sinon
+        // Android refuse de considérer l'APK comme une mise à jour. FSS_VERSION_CODE est fourni
+        // automatiquement par le workflow GitHub Actions (numéro d'exécution, toujours
+        // croissant) ; en local (Android Studio, build manuel...) on retombe sur 1.
+        versionCode (System.getenv('FSS_VERSION_CODE') ? System.getenv('FSS_VERSION_CODE').toInteger() : 1)
+        versionName (System.getenv('FSS_VERSION_NAME') ?: "1.0")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -40,8 +53,24 @@ android {
     // les secrets GitHub Actions correspondants (FSS_KEYSTORE_BASE64, FSS_KEYSTORE_PASSWORD,
     // FSS_KEY_ALIAS, FSS_KEY_PASSWORD).
     def hasReleaseKeystore = file('fss-release.keystore').exists()
-    if (hasReleaseKeystore) {
-        signingConfigs {
+    signingConfigs {
+        // Keystore de DEBUG stable et commité (voir fss-debug.keystore) : c'est LUI qui est
+        // utilisé pour l'APK sideload (assembleDebug), celui que tu installes réellement sur les
+        // TPE. Sans ceci, Gradle génère par défaut un certificat de debug ALÉATOIRE — et sur les
+        // runners GitHub Actions (une machine neuve à chaque build, rien n'est conservé d'une
+        // fois sur l'autre), ce certificat aléatoire change à CHAQUE compilation. Résultat : plus
+        // aucune mise à jour ne pouvait s'installer par-dessus la précédente (certificats
+        // différents à chaque fois) et il fallait désinstaller à chaque fois, ce qui effaçait
+        // toutes les données. En committant ce keystore et en le réutilisant explicitement ici,
+        // toutes les APK de debug publiées à partir de maintenant partagent le même certificat,
+        // et s'installent donc les unes par-dessus les autres en conservant les données.
+        debug {
+            storeFile file('fss-debug.keystore')
+            storePassword 'fss-caisse-debug'
+            keyAlias 'fss-caisse-debug'
+            keyPassword 'fss-caisse-debug'
+        }
+        if (hasReleaseKeystore) {
             release {
                 storeFile file('fss-release.keystore')
                 storePassword System.getenv('FSS_KEYSTORE_PASSWORD')
@@ -52,6 +81,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

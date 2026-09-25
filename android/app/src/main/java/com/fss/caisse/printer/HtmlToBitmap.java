@@ -44,6 +44,13 @@ public class HtmlToBitmap {
     public interface Callback {
         void onBitmap(Bitmap bitmap);
         void onError(String message);
+        /**
+         * Appelé EN PLUS de onBitmap (jamais à la place) quand le bitmap produit semble
+         * anormalement vide (quasi entièrement blanc) — signe très probable d'un raté de rendu
+         * plutôt que d'un problème d'imprimante. Optionnel : laisser vide ne change rien au
+         * comportement d'impression, ça sert uniquement à afficher un avertissement utile.
+         */
+        default void onSuspectBlank() {}
     }
 
     public static void render(Activity activity, String html, int widthPx, @NonNull Callback callback) {
@@ -105,6 +112,25 @@ public class HtmlToBitmap {
                             try {
                                 int contentHeightPx = (int) (view.getContentHeight() * view.getScale());
                                 if (contentHeightPx <= 0) contentHeightPx = 600;
+
+                                // CAUSE TRÈS PROBABLE d'une impression qui sort BLANCHE (ou avec
+                                // seulement quelques pixels en haut) malgré tout le reste : cette
+                                // WebView est ajoutée à "root", qui est le vrai décor de l'Activity
+                                // ENCORE ACTIVE (celle qui affiche toute l'appli) — donc n'importe
+                                // quelle repasse de layout du système déclenchée entretemps par le
+                                // reste de l'interface (l'appli continue de tourner pendant qu'on
+                                // imprime) reposait cette WebView à sa taille de LayoutParams
+                                // d'ORIGINE (voir plus haut : 10px de haut, juste le temps de
+                                // charger le HTML), écrasant le layout(0,0,widthPx,contentHeightPx)
+                                // qu'on fait ci-dessous À LA MAIN. Résultat : view.draw(canvas)
+                                // capture presque uniquement la marge blanche du haut, sur un
+                                // canvas par ailleurs correctement rempli de blanc — donc un ticket
+                                // qui "sort blanc". On met donc AUSSI à jour les LayoutParams réels
+                                // de la vue avec la bonne hauteur, pas seulement measure()/layout(),
+                                // pour qu'une repasse système ultérieure retombe sur la bonne taille
+                                // au lieu de l'écraser.
+                                FrameLayout.LayoutParams finalLp = new FrameLayout.LayoutParams(widthPx, contentHeightPx);
+                                view.setLayoutParams(finalLp);
                                 view.measure(
                                         View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
                                         View.MeasureSpec.makeMeasureSpec(contentHeightPx, View.MeasureSpec.EXACTLY)
@@ -115,6 +141,14 @@ public class HtmlToBitmap {
                                 Canvas canvas = new Canvas(bitmap);
                                 canvas.drawColor(Color.WHITE);
                                 view.draw(canvas);
+
+                                if (looksBlank(bitmap)) {
+                                    Log.w(TAG, "Bitmap de ticket rendu mais quasi entièrement blanc "
+                                            + "(" + bitmap.getWidth() + "x" + bitmap.getHeight() + "px) — "
+                                            + "probable raté de rendu, pas un problème d'imprimante.");
+                                    try { callback.onSuspectBlank(); } catch (Exception ignored) {}
+                                }
+
                                 callback.onBitmap(bitmap);
                             } catch (Exception e) {
                                 callback.onError("Erreur de rendu du ticket : " + e.getMessage());
@@ -130,5 +164,33 @@ public class HtmlToBitmap {
                 callback.onError("Impossible de préparer le rendu du ticket : " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Détection rapide (échantillonnage, pas pixel par pixel) d'un bitmap quasi entièrement
+     * blanc — ex: la marge blanche du haut d'un ticket dont le contenu réel n'a jamais été
+     * dessiné (voir le commentaire dans onPageFinished ci-dessus). Simple garde-fou de diagnostic :
+     * un faux positif/négatif occasionnel n'a aucune conséquence, ça ne fait qu'ajouter un
+     * avertissement dans les logs et l'appli.
+     */
+    private static boolean looksBlank(Bitmap bitmap) {
+        int w = bitmap.getWidth(), h = bitmap.getHeight();
+        if (w <= 0 || h <= 0) return true;
+        int stepX = Math.max(1, w / 40);
+        int stepY = Math.max(1, h / 200);
+        int sampled = 0, nonWhite = 0;
+        for (int y = 0; y < h; y += stepY) {
+            for (int x = 0; x < w; x += stepX) {
+                int px = bitmap.getPixel(x, y);
+                sampled++;
+                // Blanc quasi pur (tolérance pour l'anticrénelage du texte) : les trois canaux
+                // au-dessus de 250 sont considérés comme du "vide".
+                int r = (px >> 16) & 0xFF, g = (px >> 8) & 0xFF, b = px & 0xFF;
+                if (r < 250 || g < 250 || b < 250) nonWhite++;
+            }
+        }
+        if (sampled == 0) return true;
+        // Un ticket normal (texte + séparateurs) a largement plus de 0,5% de pixels non blancs.
+        return (nonWhite * 1000L / sampled) < 5;
     }
 }

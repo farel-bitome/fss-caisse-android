@@ -336,7 +336,17 @@ public class FssNativeBridge {
             Log.w(TAG, "Largeur d'impression réduite de " + widthPx + "px à " + effectiveWidthPx
                     + "px (limite physique de " + driver.getName() + ").");
         }
+        // Rempli par onSuspectBlank() (voir HtmlToBitmap) si le bitmap rendu semble quasi
+        // entièrement blanc — permet de renvoyer un avertissement explicite au JS même quand le
+        // driver imprimante répond "succès" (il a bien reçu et imprimé l'image... qui était vide
+        // dès le rendu). Sans ça, "impression réussie" masquait un ticket blanc sorti du rendu.
+        final boolean[] suspectBlank = {false};
         HtmlToBitmap.render(activity, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
+            @Override
+            public void onSuspectBlank() {
+                suspectBlank[0] = true;
+            }
+
             @Override
             public void onBitmap(final Bitmap bitmap) {
                 // HtmlToBitmap.render() termine sur le thread UI (nécessaire pour dessiner la
@@ -346,7 +356,14 @@ public class FssNativeBridge {
                 // ticket long. On repasse donc sur le thread de fond avant d'appeler le driver.
                 bg.execute(() -> driver.printBitmap(bitmap, new PrinterDriver.Callback() {
                     @Override
-                    public void onSuccess() { respond(callbackId, ok()); }
+                    public void onSuccess() {
+                        respond(callbackId, suspectBlank[0]
+                                ? error("Le ticket a été envoyé à l'imprimante, mais son rendu était "
+                                        + "quasiment vide (page blanche) avant même l'impression — "
+                                        + "ce n'est pas l'imprimante qui est en cause ici, réessayez ; "
+                                        + "si ça persiste, ce diagnostic doit être transmis au développeur.")
+                                : ok());
+                    }
 
                     @Override
                     public void onError(String message) {
