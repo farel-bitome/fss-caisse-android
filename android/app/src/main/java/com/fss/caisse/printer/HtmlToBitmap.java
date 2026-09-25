@@ -10,7 +10,6 @@ import android.graphics.Color;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.RenderProcessGoneDetail;
@@ -125,13 +124,24 @@ public class HtmlToBitmap {
         });
     }
 
+    // Attente de stabilisation de la hauteur réelle du contenu avant capture (voir
+    // waitForStableHeightThenCapture ci-dessous) : un ticket court (test) se stabilise dès la
+    // première vérification, mais un ticket plus long (addition avec plusieurs articles, bilan de
+    // clôture...) peut demander plusieurs passes de rendu interne avant que sa hauteur finale ne
+    // soit connue — capturer trop tôt, sur un seul événement de layout, produisait un bitmap à une
+    // hauteur intermédiaire (souvent quasi vide) pour ces tickets plus longs, d'où "rien ne sort".
+    private static final int STABILITY_CHECK_DELAY_MS = 80;
+    private static final int STABILITY_REQUIRED_CONSECUTIVE = 3;
+    private static final int STABILITY_MAX_CHECKS = 50; // ~50 x 80ms = 4s max avant capture forcée
+
     /**
      * Héberge la WebView dans une fenêtre Dialog totalement indépendante de celle de l'Activité
-     * (invisible, hors-écran, ni tactile ni focusable) puis attend un VRAI événement de layout
-     * terminé — pas un simple délai arbitraire — avant de dessiner le contenu dans un bitmap.
-     * Comme cette fenêtre n'appartient qu'à ce rendu et à rien d'autre dans l'appli, aucune
-     * repasse de layout déclenchée par le reste de l'interface ne peut plus jamais lui faire
-     * perdre sa taille avant la capture (c'était la cause du bug "ticket blanc" historique).
+     * (invisible, hors-écran, ni tactile ni focusable) puis attend que le CONTENU ait fini de
+     * grandir (hauteur stable sur plusieurs vérifications successives, voir
+     * waitForStableHeightThenCapture) avant de dessiner le contenu dans un bitmap. Comme cette
+     * fenêtre n'appartient qu'à ce rendu et à rien d'autre dans l'appli, aucune repasse de layout
+     * déclenchée par le reste de l'interface ne peut plus jamais lui faire perdre sa taille avant
+     * la capture (c'était la cause du bug "ticket blanc" historique).
      */
     private static void captureInOwnWindow(Activity activity, WebView webView, int widthPx, Callback callback) {
         try {
@@ -158,24 +168,57 @@ public class HtmlToBitmap {
             }
 
             dialog.show();
-
-            final boolean[] captured = {false};
-            webView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
-                @Override
-                public void onGlobalLayout() {
-                    if (captured[0]) return;
-                    if (webView.getWidth() <= 0 || webView.getHeight() <= 0) return;
-                    captured[0] = true;
-                    try { webView.getViewTreeObserver().removeOnGlobalLayoutListener(this); } catch (Exception ignored) {}
-                    // Un post() supplémentaire laisse le passage de DESSIN (pas seulement de
-                    // layout) du système se terminer avant qu'on capture le Canvas nous-mêmes.
-                    webView.post(() -> finishCapture(dialog, webView, widthPx, callback));
-                }
-            });
+            waitForStableHeightThenCapture(dialog, webView, widthPx, callback, 0, -1, 0);
         } catch (Exception e) {
             try { webView.destroy(); } catch (Exception ignored) {}
             callback.onError("Impossible de préparer la fenêtre de rendu du ticket : " + e.getMessage());
         }
+    }
+
+    /**
+     * Interroge webView.getContentHeight() (hauteur RÉELLE du document HTML chargé, en pixels CSS,
+     * indépendante des aléas du layout Android) à intervalles réguliers, jusqu'à ce qu'elle cesse
+     * de changer sur plusieurs vérifications consécutives — signe que le rendu interne de la
+     * WebView est bien terminé — plutôt que de se fier à un seul événement de layout ponctuel.
+     */
+    private static void waitForStableHeightThenCapture(Dialog dialog, WebView webView, int widthPx,
+                                                         Callback callback, int attempt,
+                                                         int lastContentHeightPx, int stableCount) {
+        if (attempt >= STABILITY_MAX_CHECKS) {
+            Log.w(TAG, "Délai d'attente de stabilisation du ticket dépassé — capture avec la "
+                    + "dernière hauteur connue (" + lastContentHeightPx + "px) plutôt que d'échouer.");
+            applyMeasuredHeight(webView, widthPx, lastContentHeightPx);
+            finishCapture(dialog, webView, widthPx, callback);
+            return;
+        }
+        webView.postDelayed(() -> {
+            int contentHeightPx = Math.round(webView.getContentHeight() * webView.getScale());
+            if (contentHeightPx > 0 && contentHeightPx == lastContentHeightPx) {
+                int newStableCount = stableCount + 1;
+                if (newStableCount >= STABILITY_REQUIRED_CONSECUTIVE) {
+                    applyMeasuredHeight(webView, widthPx, contentHeightPx);
+                    finishCapture(dialog, webView, widthPx, callback);
+                    return;
+                }
+                waitForStableHeightThenCapture(dialog, webView, widthPx, callback, attempt + 1, contentHeightPx, newStableCount);
+            } else {
+                waitForStableHeightThenCapture(dialog, webView, widthPx, callback, attempt + 1, contentHeightPx, 0);
+            }
+        }, STABILITY_CHECK_DELAY_MS);
+    }
+
+    /**
+     * Fixe explicitement les dimensions finales du WebView (measure + layout manuels) à la
+     * largeur du ticket et à la hauteur RÉELLE du contenu qu'on vient de déterminer — au lieu de
+     * se fier au recalcul automatique "wrap_content" d'Android, qui peut se figer trop tôt sur du
+     * contenu long.
+     */
+    private static void applyMeasuredHeight(WebView webView, int widthPx, int heightPx) {
+        int finalHeight = Math.max(1, heightPx);
+        int widthSpec = View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY);
+        int heightSpec = View.MeasureSpec.makeMeasureSpec(finalHeight, View.MeasureSpec.EXACTLY);
+        webView.measure(widthSpec, heightSpec);
+        webView.layout(0, 0, widthPx, finalHeight);
     }
 
     private static void finishCapture(Dialog dialog, WebView webView, int widthPx, Callback callback) {
@@ -185,6 +228,11 @@ public class HtmlToBitmap {
             Canvas canvas = new Canvas(bitmap);
             canvas.drawColor(Color.WHITE);
             webView.draw(canvas);
+            // Le rendu WebView anti-crénèle le texte (pixels gris sur les contours) : très lisible
+            // à l'écran, mais une tête d'impression thermique restitue ce gris comme un texte pâle
+            // et peu net. On force chaque pixel en noir pur ou blanc pur pour un ticket net et
+            // bien contrasté, quel que soit le réglage de "densité" du pilote imprimante.
+            bitmap = blackAndWhiteThreshold(bitmap);
             if (looksBlank(bitmap)) {
                 Log.w(TAG, "Bitmap de ticket rendu mais quasi entièrement blanc ("
                         + bitmap.getWidth() + "x" + bitmap.getHeight() + "px).");
@@ -197,6 +245,31 @@ public class HtmlToBitmap {
             try { dialog.dismiss(); } catch (Exception ignored) {}
             try { webView.destroy(); } catch (Exception ignored) {}
         }
+    }
+
+    /**
+     * Seuil de luminance en dessous duquel un pixel devient noir pur (sinon blanc pur). 180/255
+     * laisse passer en noir un gris moyennement foncé — plus permissif qu'un simple seuil à 128,
+     * pour ne pas perdre les traits fins (bordures de tableau à 1px, texte en petite taille).
+     */
+    private static final int BW_THRESHOLD = 180;
+
+    private static Bitmap blackAndWhiteThreshold(Bitmap source) {
+        int w = source.getWidth(), h = source.getHeight();
+        int[] pixels = new int[w * h];
+        source.getPixels(pixels, 0, w, 0, 0, w, h);
+        for (int i = 0; i < pixels.length; i++) {
+            int px = pixels[i];
+            int a = (px >>> 24) & 0xFF;
+            int r = (px >> 16) & 0xFF, g = (px >> 8) & 0xFF, b = px & 0xFF;
+            // Un pixel transparent (fond non peint) compte comme blanc, pas comme noir.
+            int luminance = a == 0 ? 255 : (int) (0.299 * r + 0.587 * g + 0.114 * b);
+            pixels[i] = (luminance < BW_THRESHOLD) ? 0xFF000000 : 0xFFFFFFFF;
+        }
+        Bitmap result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        result.setPixels(pixels, 0, w, 0, 0, w, h);
+        source.recycle();
+        return result;
     }
 
     /** Remonte la chaîne des ContextWrapper pour retrouver l'Activity sous-jacente, s'il y en a une. */

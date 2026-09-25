@@ -285,6 +285,19 @@ public class FssNativeBridge {
                     PrinterDriver driver = PrinterDriverFactory.get(context);
                     r.put("name", driver.getName());
                     r.put("available", driver.isAvailable());
+                    // Format papier RÉELLEMENT utilisé à l'impression sur ce TPE précis — sans ça,
+                    // impossible pour l'utilisateur de vérifier depuis l'appli (sans démonter
+                    // l'imprimante) si un ticket 80mm envoyé a bien été réduit en 58mm ou non
+                    // (voir PrinterDriver.getMaxWidthPx() / FssNativeBridge.doPrint()).
+                    int maxWidthPx = driver.getMaxWidthPx();
+                    if (maxWidthPx > 0) {
+                        r.put("formatForce", true);
+                        r.put("formatLabel", maxWidthPx <= 400 ? "58mm" : (maxWidthPx + "px"));
+                        r.put("maxWidthPx", maxWidthPx);
+                    } else {
+                        r.put("formatForce", false);
+                        r.put("formatLabel", "58mm ou 80mm selon le ticket (aucune limite physique détectée)");
+                    }
                 } catch (Exception e) {
                     r.put("name", "Erreur de détection : " + e.getMessage());
                     r.put("available", false);
