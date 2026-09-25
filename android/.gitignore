@@ -13,15 +13,35 @@
 *.class
 
 # Generated files
-bin/
-gen/
-out/
+# ATTENTION : le template Android standard met ces motifs SANS "/" en tête ("bin/", "build/"...),
+# ce qui les fait correspondre à N'IMPORTE QUEL dossier portant ce nom À N'IMPORTE QUELLE
+# PROFONDEUR sous android/ — y compris, en pratique, des dossiers de build internes à certains
+# paquets npm embarqués dans app/src/main/assets/www/nodejs-project/node_modules/ (par exemple
+# engine.io/build/, engine.io-parser/build/, socket.io-parser/build/). C'est un bug réel et
+# vérifié rencontré sur ce projet : ces dossiers étaient exclus SILENCIEUSEMENT par Git (jamais
+# poussés sur GitHub, donc jamais présents dans l'APK compilé par CI), provoquant des erreurs
+# "Cannot find module" au démarrage du serveur embarqué alors que tout semblait correct en local.
+# On ancre donc chaque motif à l'emplacement RÉEL des dossiers de build Gradle qu'il vise.
+app/bin/
+app/gen/
+app/out/
+capacitor-cordova-android-plugins/bin/
+capacitor-cordova-android-plugins/gen/
+capacitor-cordova-android-plugins/out/
 #  Uncomment the following line in case you need and you don't have the release build type files in your app
 # release/
 
 # Gradle files
 .gradle/
-build/
+app/build/
+capacitor-cordova-android-plugins/build/
+
+# Sécurité supplémentaire : quel que soit un futur motif générique non ancré qui serait ajouté
+# plus haut (mise à jour de ce template, nouvelle règle...), ne JAMAIS exclure le serveur Node
+# embarqué et son node_modules — il est copié tel quel dans l'APK et doit être commité en entier,
+# "build/" internes aux paquets npm inclus.
+!app/src/main/assets/www/nodejs-project/
+!app/src/main/assets/www/nodejs-project/**
 
 # Local configuration file (sdk path, etc)
 local.properties

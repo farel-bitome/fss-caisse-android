@@ -265,6 +265,33 @@ node_modules") vérifie aussi, indépendamment, l'état réel sur le disque de `
 `node_modules/engine.io`, son sous-dossier `build/` et les fichiers clés de `socket.io` — de quoi
 localiser immédiatement à quel niveau précis l'arborescence s'arrête si le souci revient.
 
+## Troisième panne résolue (cause racine réelle) : Git excluait silencieusement 83 fichiers
+
+Le diagnostic ci-dessus a permis de trouver la VRAIE cause, définitivement : `copyNodeJSAssets()`
+copiait bien ses 849 fichiers listés dans `file.list`, **sans la moindre erreur** — mais
+`engine.io/build/`, `engine.io-parser/build/` et `socket.io-parser/build/` (83 fichiers au total,
+dont `engine.io.js`) n'étaient tout simplement **jamais présents dans `file.list` pour
+commencer**. La cause : `android/.gitignore` (généré par le template Android standard) contient la
+ligne `build/` **sans `/` au début** — un tel motif Git exclut n'importe quel dossier nommé
+"build" à **n'importe quelle profondeur**, pas seulement les vraies sorties de compilation Gradle
+(`android/app/build/`). Résultat : en committant/poussant ce dépôt (GitHub Desktop), Git excluait
+silencieusement ces 3 dossiers **internes à des paquets npm embarqués** — ils n'ont jamais atteint
+GitHub, donc jamais le build CI, qui régénère `file.list` à partir de ce qu'il trouve réellement
+dans le dépôt. Vérifié avec `git add -A` + `git check-ignore` : ces 83 fichiers étaient bien
+silencieusement ignorés avant correction, et sont bien suivis après.
+
+**Correction** : `android/.gitignore` ancre maintenant chaque motif générique du template
+(`build/`, `bin/`, `gen/`, `out/`) à l'emplacement réel des dossiers de build Gradle
+(`app/build/`, `capacitor-cordova-android-plugins/build/`...) au lieu de motifs non ancrés, plus
+une règle de négation explicite (`!app/src/main/assets/www/nodejs-project/**`) qui protège
+définitivement le serveur Node embarqué contre tout futur motif générique du même genre. Si tu as
+cloné ce dépôt AVANT cette correction, vérifie après avoir mis à jour que `git status` ne montre
+plus ces 3 dossiers comme non suivis — sinon `git add -A` puis commit pour les faire enfin
+apparaître sur GitHub. **C'est très probablement la cause de la panne "Cannot find module
+engine.io/build/engine.io.js" rencontrée — les deux corrections précédentes (assets manquants du
+plugin, champ "exports" incompatible Node 12) restent nécessaires mais n'étaient pas suffisantes
+tant que ces fichiers n'atteignaient jamais GitHub du tout.**
+
 ## Limites connues / à trancher
 
 - **`openBackupFileDialog`** (restauration manuelle d'une sauvegarde) : pas de sélecteur de
