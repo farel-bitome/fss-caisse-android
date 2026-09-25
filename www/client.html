@@ -64,6 +64,7 @@
   <input id="port" placeholder="3000" value="3000">
   <button onclick="connect()">Se connecter</button>
   <div class="err" id="err"></div>
+  <div class="back" onclick="window.electronAPI.reloadApp()">← Retour</div>
 </div>
 <script>
   window.electronAPI.getCurrentServer().then(function (url) {

@@ -49,12 +49,19 @@ public class FssNativeBridge {
     private static final String PREFS = "fss_caisse_config";
 
     private final Context context;
+    // Référence à l'Activity (quand le contexte fourni en est une — c'est le cas dans
+    // MainActivity), utilisée UNIQUEMENT pour attacher temporairement une WebView de rendu à la
+    // fenêtre réelle de l'appli lors de l'impression (voir HtmlToBitmap) — sans quoi le bitmap
+    // rendu est très souvent blanc. Ne jamais stocker autre chose dessus qui vivrait plus
+    // longtemps que l'Activity elle-même.
+    private final android.app.Activity activity;
     private final WebView webView;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService bg = Executors.newCachedThreadPool();
     private final Licensing licensing;
 
     public FssNativeBridge(Context context, WebView webView) {
+        this.activity = (context instanceof android.app.Activity) ? (android.app.Activity) context : null;
         this.context = context.getApplicationContext();
         this.webView = webView;
         this.licensing = new Licensing(this.context);
@@ -269,6 +276,23 @@ public class FssNativeBridge {
                 doPrint(args.optString("html", ""), widthPx, callbackId);
                 break;
             }
+            case "getPrinterInfo": {
+                // Le menu "Type d'imprimante" des Paramètres (USB/Bluetooth/Réseau) est un réglage
+                // hérité de la version bureau, jamais lu par le code d'impression Android — sans
+                // ça, l'utilisateur n'a aucun moyen de savoir QUEL pilote est réellement utilisé
+                // sur son TPE. On expose ici la vraie détection de PrinterDriverFactory.
+                JSONObject r = new JSONObject();
+                try {
+                    PrinterDriver driver = PrinterDriverFactory.get(context);
+                    r.put("name", driver.getName());
+                    r.put("available", driver.isAvailable());
+                } catch (Exception e) {
+                    r.put("name", "Erreur de détection : " + e.getMessage());
+                    r.put("available", false);
+                }
+                respond(callbackId, r);
+                break;
+            }
             case "saveFileDialog": {
                 doSaveFile(args, callbackId);
                 break;
@@ -301,7 +325,7 @@ public class FssNativeBridge {
     // ---------------------------------------------------------------------------------------
     private void doPrint(String html, int widthPx, String callbackId) {
         final PrinterDriver driver = PrinterDriverFactory.get(context);
-        HtmlToBitmap.render(context, html, widthPx, new HtmlToBitmap.Callback() {
+        HtmlToBitmap.render(activity, html, widthPx, new HtmlToBitmap.Callback() {
             @Override
             public void onBitmap(final Bitmap bitmap) {
                 driver.printBitmap(bitmap, new PrinterDriver.Callback() {

@@ -257,6 +257,17 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
         // vraie mise à jour. Sans ça, un poste avec une version un peu
         // ancienne du catalogue (pas encore reçu un ajout/modif fait
         // ailleurs) pouvait écraser un article tout juste mis à jour.
+        // printBatches ne sert qu'à signaler aux postes (voir network.js) qu'un NOUVEAU bon de
+        // commande cuisine/bar (ou bilan de clôture) vient d'arriver, pour qu'ils l'impriment une
+        // fois chacun. Une fois cet aller-retour fait, une entrée ancienne ne sert plus jamais à
+        // rien (un poste qui se reconnecte ne réimprime jamais l'historique — voir prevBatchIds
+        // initialisé à null). Sans purge, ce tableau grossirait indéfiniment avec l'usage (chaque
+        // envoi en cuisine, chaque clôture), alourdissant data.json et CHAQUE synchronisation
+        // /api/state (et le journal socket.io) un peu plus chaque jour. On ne garde que les
+        // entrées les plus récentes.
+        if (Array.isArray(nouvelEtat.printBatches) && nouvelEtat.printBatches.length > 200) {
+          nouvelEtat.printBatches = nouvelEtat.printBatches.slice(-200);
+        }
         const ancienHorodatageArts = (state && state.artsUpdatedAt) || 0;
         const nouvelHorodatageArts = nouvelEtat.artsUpdatedAt || 0;
         if (ancienHorodatageArts > nouvelHorodatageArts) {

@@ -1,6 +1,7 @@
 package com.fss.caisse;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -55,5 +56,55 @@ public class MainActivity extends BridgeActivity {
         // page (voir FssWebViewClient), tout en conservant le comportement Capacitor/Cordova
         // standard (routage des plugins, événement deviceready, etc.) via super().
         webView.setWebViewClient(new FssWebViewClient(this.bridge));
+    }
+
+    /**
+     * Comportement du bouton retour matériel/geste Android — trois niveaux, du plus interne au
+     * plus externe, pour ne JAMAIS fermer l'appli sur un appui "retour" qui visait juste à
+     * changer d'écran :
+     *  1) L'application principale (index.html, écran de caisse) gère elle-même ses propres
+     *     "écrans" internes (pages Articles/Stock/Paramètres..., modales) sans navigation WebView
+     *     réelle — on lui demande d'abord si CET appui doit fermer une modale ou revenir à l'écran
+     *     précédent DANS l'appli (voir window.__fssHandleBack / retourEcranPrecedent() côté JS).
+     *  2) Sinon, s'il reste de l'historique de navigation WebView (ex : Choix du rôle -> Connexion
+     *     au serveur -> ...), on revient à l'écran précédent. AVANT ce correctif, n'importe quel
+     *     appui sur "retour" pendant ces écrans de configuration fermait directement toute
+     *     l'application (comportement par défaut d'Android quand rien ne l'intercepte) —
+     *     exactement le "je change de page et ça se ferme" signalé.
+     *  3) Seulement quand aucun des deux niveaux ci-dessus n'a rien à proposer (donc qu'on est
+     *     vraiment sur l'écran d'accueil, sans rien d'ouvert), on demande confirmation avant de
+     *     fermer l'appli, plutôt que de la fermer directement sans prévenir.
+     */
+    @Override
+    public void onBackPressed() {
+        final WebView webView = (this.bridge != null) ? this.bridge.getWebView() : null;
+        if (webView == null) {
+            confirmerSortie();
+            return;
+        }
+        // window.__fssHandleBack n'existe que sur l'écran principal (index.html) — absent sur les
+        // écrans de configuration (choice/client/server-ip/activation.html), d'où le typeof avant
+        // l'appel : sur ces derniers, on tombe directement au niveau 2 (historique WebView).
+        String script = "(function(){try{return (typeof window.__fssHandleBack==='function') "
+                + "&& window.__fssHandleBack()==='1' ? '1' : '0';}catch(e){return '0';}})()";
+        webView.evaluateJavascript(script, (String result) -> {
+            boolean geeParLApp = "\"1\"".equals(result);
+            if (geeParLApp) return; // Niveau 1 : modale fermée ou écran précédent affiché par le JS.
+            if (webView.canGoBack()) {
+                webView.goBack(); // Niveau 2.
+                return;
+            }
+            confirmerSortie(); // Niveau 3.
+        });
+    }
+
+    private void confirmerSortie() {
+        new AlertDialog.Builder(this)
+                .setTitle("Quitter FSS-CAISSE ?")
+                .setMessage("Voulez-vous vraiment fermer l'application ?")
+                .setPositiveButton("Quitter", (dialog, which) -> MainActivity.super.onBackPressed())
+                .setNegativeButton("Annuler", null)
+                .setCancelable(true)
+                .show();
     }
 }

@@ -85,6 +85,8 @@
     </div>
     <button class="btn-secondary" id="continue-btn" style="width:100%; padding:11px;">Continuer</button>
   </div>
+
+  <div id="back-link" style="display:none; text-align:center; margin-top:14px; font-size:11px; color:#666; cursor:pointer;" onclick="window.electronAPI.reloadApp()">← Retour</div>
 </div>
 
 <script>
@@ -99,12 +101,20 @@
       document.getElementById('info-text').style.display = 'none';
       document.getElementById('activation-form').style.display = 'none';
       document.getElementById('activated-state').style.display = 'block';
+      // Déjà activé : cet écran n'a pu être atteint que volontairement (jamais en blocage
+      // forcé, puisqu'une licence valide ne bloque jamais) — un retour est donc toujours sûr.
+      document.getElementById('back-link').style.display = 'block';
       return;
     }
     window.electronAPI.getTrialStatus().then((trial) => {
       document.getElementById('subtitle').textContent = trial.expired
         ? "Période d'essai de 3 jours terminée"
         : `Version d'essai — ${trial.daysLeft} jour(s) restant(s)`;
+      // Tant que l'essai n'est pas expiré, cet écran n'est jamais un blocage forcé (voir
+      // Licensing.isBlocked() : blocked = trial expirée ET pas de licence) — donc un bouton
+      // retour est sûr. Une fois l'essai expiré, PAS de bouton retour : l'activation devient
+      // obligatoire, un contournement viderait cette protection de son sens.
+      document.getElementById('back-link').style.display = trial.expired ? 'none' : 'block';
     });
   });
 

@@ -249,6 +249,10 @@
     getCurrentServer: function () { return call('getCurrentServer', {}).then(function (r) { return r && r.url; }); },
     // format : '58mm' ou '80mm' (défaut '80mm' si omis, pour compat avec les appels existants).
     printSilent: function (html, format) { return call('printSilent', { html: html, format: format || '80mm' }); },
+    // Renvoie {name, available} : le VRAI pilote détecté sur ce TPE (Sunmi/Senraise/secours
+    // système), pour l'afficher dans les Paramètres au lieu du menu "Type d'imprimante"
+    // (USB/Bluetooth/Réseau), hérité de la version bureau et sans effet sur Android.
+    getPrinterInfo: function () { return call('getPrinterInfo', {}); },
     getServerIpInfo: function () { return call('getServerIpInfo', {}); },
     saveManualIp: function (ip, port) { return call('saveManualIp', { ip: ip, port: port }); },
     resetManualIp: function () { return call('resetManualIp', {}); },
