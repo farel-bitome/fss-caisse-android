@@ -298,11 +298,38 @@ public class FssNativeBridge {
                         r.put("formatForce", false);
                         r.put("formatLabel", "58mm ou 80mm selon le ticket (aucune limite physique détectée)");
                     }
+                    // Sans cette permission, l'impression AUTOMATIQUE (bon de commande déclenché
+                    // par network.js) peut échouer silencieusement dès que l'appli n'est pas au
+                    // premier plan (écran éteint, rôle "Serveur" en mode autonome) — voir
+                    // HtmlToBitmap. On l'expose ici pour que l'écran Paramètres puisse avertir
+                    // l'utilisateur et proposer de l'accorder (voir requestOverlayPermission).
+                    r.put("overlayPermissionGranted", HtmlToBitmap.hasOverlayPermission(context));
                 } catch (Exception e) {
                     r.put("name", "Erreur de détection : " + e.getMessage());
                     r.put("available", false);
                 }
                 respond(callbackId, r);
+                break;
+            }
+            case "requestOverlayPermission": {
+                // Permission "spéciale" : impossible à accorder par un simple
+                // ActivityCompat.requestPermissions — il faut rediriger l'utilisateur vers l'écran
+                // système dédié (Settings.ACTION_MANAGE_OVERLAY_PERMISSION), qui affiche
+                // explicitement le nom de l'appli et un interrupteur à activer manuellement.
+                android.app.Activity activity = activityRef.get();
+                if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+                    respond(callbackId, error("Fenêtre principale indisponible pour ouvrir ce réglage."));
+                    break;
+                }
+                try {
+                    Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + context.getPackageName()));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    activity.startActivity(intent);
+                    respond(callbackId, ok());
+                } catch (Exception e) {
+                    respond(callbackId, error("Impossible d'ouvrir le réglage système : " + e.getMessage()));
+                }
                 break;
             }
             case "saveFileDialog": {
@@ -352,14 +379,30 @@ public class FssNativeBridge {
         // entièrement blanc — permet de renvoyer un avertissement explicite au JS même quand le
         // driver imprimante répond "succès" (il a bien reçu et imprimé l'image... qui était vide
         // dès le rendu). Sans ça, "impression réussie" masquait un ticket blanc sorti du rendu.
-        android.app.Activity activity = activityRef.get();
-        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
-            respond(callbackId, error("Impossible d'imprimer : la fenêtre principale de l'application "
-                    + "n'est plus disponible (réessayez depuis l'écran principal)."));
-            return;
+        //
+        // La fenêtre principale de l'appli (Activity) n'est nécessaire QUE si la permission
+        // "Afficher par-dessus les autres applications" n'est pas accordée — avec cette
+        // permission, HtmlToBitmap crée sa fenêtre de rendu directement depuis le contexte
+        // applicatif, ce qui fonctionne même écran éteint ou appli en arrière-plan (voir
+        // HtmlToBitmap.hasOverlayPermission / point 4 de son historique de classe). C'est
+        // précisément le cas du bon de commande automatique (network.js), qui peut se déclencher
+        // sans qu'aucune Activity ne soit au premier plan, contrairement à une impression manuelle
+        // (bouton addition/reçu, toujours avec l'appli visible).
+        Context renderContext = context;
+        if (!HtmlToBitmap.hasOverlayPermission(context)) {
+            android.app.Activity activity = activityRef.get();
+            if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+                respond(callbackId, error("Impossible d'imprimer : la fenêtre principale de l'application "
+                        + "n'est plus disponible (réessayez depuis l'écran principal), et la permission "
+                        + "\"Afficher par-dessus les autres applications\" n'est pas accordée (elle "
+                        + "permettrait d'imprimer même écran éteint / appli en arrière-plan — voir "
+                        + "Paramètres > Périphériques)."));
+                return;
+            }
+            renderContext = activity;
         }
         final boolean[] suspectBlank = {false};
-        HtmlToBitmap.render(activity, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
+        HtmlToBitmap.render(renderContext, html, effectiveWidthPx, new HtmlToBitmap.Callback() {
             @Override
             public void onSuspectBlank() {
                 suspectBlank[0] = true;

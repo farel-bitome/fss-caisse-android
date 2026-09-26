@@ -66,4 +66,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 13+ exige cette permission pour afficher la notification du foreground service. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Permission "spéciale" (accordée manuellement par l'utilisateur, pas au moment de
+         l'installation) nécessaire pour que HtmlToBitmap puisse créer sa fenêtre de rendu hors
+         écran via TYPE_APPLICATION_OVERLAY même quand l'appli est en arrière-plan ou l'écran
+         éteint — le cas du rôle "Serveur" en mode autonome, d'où le bon de commande automatique
+         qui pouvait ne jamais sortir sur certains TPE (voir HtmlToBitmap, point 4 de l'historique
+         de classe, et FssNativeBridge#requestOverlayPermission). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 </manifest>

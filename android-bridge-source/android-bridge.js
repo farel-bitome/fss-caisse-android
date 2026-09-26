@@ -253,6 +253,11 @@
     // système), pour l'afficher dans les Paramètres au lieu du menu "Type d'imprimante"
     // (USB/Bluetooth/Réseau), hérité de la version bureau et sans effet sur Android.
     getPrinterInfo: function () { return call('getPrinterInfo', {}); },
+    // Ouvre l'écran système "Afficher par-dessus les autres applications" pour ce TPE — voir
+    // getPrinterInfo().overlayPermissionGranted et HtmlToBitmap (impression automatique fiable
+    // même écran éteint / appli en arrière-plan, notamment le bon de commande sur le poste
+    // "Serveur").
+    requestOverlayPermission: function () { return call('requestOverlayPermission', {}); },
     getServerIpInfo: function () { return call('getServerIpInfo', {}); },
     saveManualIp: function (ip, port) { return call('saveManualIp', { ip: ip, port: port }); },
     resetManualIp: function () { return call('resetManualIp', {}); },

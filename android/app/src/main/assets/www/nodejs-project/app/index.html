@@ -772,7 +772,11 @@ td{padding:8px 11px;vertical-align:middle}
           <div style="font-size:12px;color:#888;margin-bottom:14px">Le type d'imprimante et le format papier sont détectés automatiquement sur ce TPE — aucun réglage à faire.</div>
           <div id="devPrintTpeInfo" style="display:none;font-size:12px;background:#111;border:1px solid #333;border-radius:6px;padding:10px 12px;margin-bottom:14px">
             Pilote imprimante détecté sur ce TPE : <strong id="devPrintTpeNom">…</strong><br>
-            Format papier réellement utilisé à l'impression : <strong id="devPrintTpeFormat">…</strong>
+            Format papier réellement utilisé à l'impression : <strong id="devPrintTpeFormat">…</strong><br>
+            Impression fiable écran éteint / en arrière-plan (bons de commande automatiques) : <strong id="devPrintTpeOverlay">…</strong>
+            <div id="devPrintTpeOverlayBtnWrap" style="display:none;margin-top:8px">
+              <button class="btn btn-r sm" onclick="demanderPermissionAffichage()">Autoriser maintenant</button>
+            </div>
           </div>
           <div style="display:flex;gap:10px;margin-top:4px">
             <button class="btn btn-r" onclick="testPrint()">🖨️ Imprimer un test</button>
@@ -1394,10 +1398,31 @@ function rafraichirInfoImprimanteTpe(){
     if(fmtEl){
       fmtEl.textContent=(r&&r.formatLabel)?r.formatLabel:'inconnu';
     }
+    // Sans cette permission, le bon de commande automatique (déclenché par la synchro réseau)
+    // peut ne jamais sortir quand l'appli n'est pas au premier plan (écran éteint, poste
+    // "Serveur" en mode autonome) — voir HtmlToBitmap côté natif.
+    var overlayEl=g('devPrintTpeOverlay');
+    var overlayBtnWrap=g('devPrintTpeOverlayBtnWrap');
+    var granted=r&&r.overlayPermissionGranted;
+    if(overlayEl)overlayEl.textContent=granted?'✅ activée':'❌ non activée';
+    if(overlayBtnWrap)overlayBtnWrap.style.display=granted?'none':'';
   }).catch(function(){
     g('devPrintTpeNom').textContent='impossible à déterminer';
     var fmtEl=g('devPrintTpeFormat');
     if(fmtEl)fmtEl.textContent='impossible à déterminer';
+  });
+}
+function demanderPermissionAffichage(){
+  if(!(window.electronAPI&&window.electronAPI.requestOverlayPermission)){toast('Fonction indisponible','e');return;}
+  window.electronAPI.requestOverlayPermission().then(function(r){
+    if(r&&r.success===false){
+      toast('❌ '+(r.error||'Impossible d\'ouvrir le réglage'),'e');
+      return;
+    }
+    toast('Active l\'interrupteur pour FSS-CAISSE TPE puis reviens dans l\'appli','s');
+    // Rafraîchit l'état affiché quand l'utilisateur revient sur cet écran après avoir accordé
+    // (ou refusé) la permission dans les réglages système.
+    setTimeout(rafraichirInfoImprimanteTpe,1500);
   });
 }
 function startClock(){
