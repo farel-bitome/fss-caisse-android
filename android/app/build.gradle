@@ -92,6 +92,20 @@ android {
             }
         }
     }
+
+    // Sans ceci, Gradle nomme systématiquement le fichier produit "app-debug.apk" — un nom
+    // générique impossible à distinguer une fois téléchargé depuis les artefacts GitHub Actions
+    // (surtout avec plusieurs logiciels TPE en parallèle, ex. FSS-CALCUL). On renomme donc le
+    // fichier APK lui-même avec le nom du logiciel tout court, indépendamment du nom affiché sur
+    // l'appareil (déjà correct, voir android:label="@string/app_name" dans AndroidManifest.xml).
+    // NOTE : ceci ne couvre que l'APK — le nom du fichier .aab (Play Store) est renommé
+    // séparément après coup dans le workflow GitHub Actions, car l'API
+    // applicationVariants.outputs ne s'applique qu'aux variantes qui produisent un APK.
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "FSS-CAISSE-TPE.apk"
+        }
+    }
 }
 
 repositories {

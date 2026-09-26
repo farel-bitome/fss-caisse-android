@@ -180,6 +180,15 @@ jobs:
           if [ -n "$FSS_KEYSTORE_BASE64" ]; then
             echo "$FSS_KEYSTORE_BASE64" | base64 -d > app/fss-release.keystore
             ./gradlew bundleRelease --stacktrace
+            # Renomme le .aab généré (nom générique "app-release.aab" par défaut) avec le nom du
+            # logiciel et sa version — l'équivalent, pour l'AAB, du renommage déjà fait pour l'APK
+            # dans app/build.gradle (applicationVariants.outputs, qui ne s'applique qu'aux
+            # variantes produisant un APK, pas à la tâche bundleRelease).
+            AAB_DIR="app/build/outputs/bundle/release"
+            for f in "$AAB_DIR"/*.aab; do
+              [ -e "$f" ] || continue
+              mv "$f" "$AAB_DIR/FSS-CAISSE-TPE.aab"
+            done
           else
             echo "Secrets de signature absents (FSS_KEYSTORE_BASE64...) — AAB release ignoré."
             echo "Voir README.md > 'Signer pour le Play Store' pour les créer."

@@ -267,11 +267,16 @@ public class HtmlToBitmap {
     }
 
     /**
-     * Seuil de luminance en dessous duquel un pixel devient noir pur (sinon blanc pur). 180/255
-     * laisse passer en noir un gris moyennement foncé — plus permissif qu'un simple seuil à 128,
-     * pour ne pas perdre les traits fins (bordures de tableau à 1px, texte en petite taille).
+     * Seuil de luminance en dessous duquel un pixel devient noir pur (sinon blanc pur). Plus ce
+     * seuil est élevé, plus on bascule en noir des pixels gris CLAIRS (pas seulement les gris
+     * foncés) — c'est-à-dire les pixels d'anti-crénelage sur les BORDS de chaque lettre, ce qui a
+     * pour effet d'épaissir visuellement tous les traits du texte à l'impression (un "gras"
+     * renforcé, au-delà de ce que permet déjà font-weight:900 en CSS, dont l'effet réel est
+     * limité par les graisses que la police "Courier New" fournit vraiment). Relevé de 180 à 215
+     * à la demande explicite d'un texte plus gras PARTOUT (tous les types de tickets, puisque ce
+     * seuil s'applique uniformément à chaque bitmap rendu, quel que soit l'appelant).
      */
-    private static final int BW_THRESHOLD = 180;
+    private static final int BW_THRESHOLD = 215;
 
     private static Bitmap blackAndWhiteThreshold(Bitmap source) {
         int w = source.getWidth(), h = source.getHeight();

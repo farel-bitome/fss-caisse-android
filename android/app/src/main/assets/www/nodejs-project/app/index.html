@@ -1680,12 +1680,15 @@ var resumingAttenteId=null,resumingBaseItems=null,resumingSentQty=null;
 function imprimerTicketAttente(batch){
   var fmt=formatPapierTpe();
   var etab=g('etabNom')?g('etabNom').value:'FSS-CAISSE';
+  // Marges latérales réduites au minimum (1mm au lieu de 4mm) pour utiliser presque toute la
+  // largeur du rouleau 58mm au lieu de laisser une bande vide de chaque côté — même logique que
+  // pour l'addition et le reçu.
   var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:13px;font-weight:900;padding:3mm 4mm}'+
-    'table{width:100%;border-collapse:collapse;margin:2px 0}'+
-    'td{padding:2px 0;vertical-align:top}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm}'+
+    'table{width:100%;border-collapse:collapse;margin:0}'+
+    'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
     'td.r{text-align:right;padding-left:10px}'+
     '.sep{border-top:1px dashed #000;margin:6px 0}'+
@@ -1693,19 +1696,29 @@ function imprimerTicketAttente(batch){
   function ligne(label,val){
     return '<table><tr><td class="l">'+label+'</td><td class="r">'+val+'</td></tr></table>';
   }
+  // Label et valeur collés l'un à l'autre à gauche — même principe que sur les autres tickets
+  // (addition, reçu) : largeur de label fixe (1ch = largeur d'un caractère en police à chasse
+  // fixe) calée sur le plus long label de ce ticket ("N° Commande") pour que les valeurs
+  // démarrent à la même position.
+  function ligneG(label,val){
+    return '<div style="text-align:left;margin-bottom:3px"><span style="display:inline-block;width:11ch">'+label+'</span>: '+val+'</div>';
+  }
   var attId=batch.attenteId||batch.id;
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>';
-  html+='<div class="c" style="font-size:15px">'+etab+'</div>';
-  html+='<div class="c" style="font-size:14px;margin:4px 0">'+(batch.ajout?'📨 AJOUT À LA COMMANDE':'📨 BON DE COMMANDE')+'</div>';
+  // Pas d'émoji dans les titres : certains TPE (Sunmi/Senraise) n'ont pas de police emoji
+  // embarquée, et le glyphe de remplacement ("tofu") décentre visuellement le titre — texte pur,
+  // garanti bien centré sur tout appareil (voir aussi imprimerTicketCommande plus haut).
+  html+='<div class="c" style="font-size:15px"><strong>'+etab+'</strong></div>';
+  html+='<div class="c" style="font-size:14px;margin:4px 0"><strong>'+(batch.ajout?'AJOUT À LA COMMANDE':'BON DE COMMANDE')+'</strong></div>';
   html+='<div class="sep"></div>';
-  html+='<div class="c" style="font-size:26px;line-height:1.15">'+(batch.tableNom||'—')+'</div>';
-  html+='<div class="c" style="font-size:16px;margin-top:2px">👤 '+(batch.srv||'—')+'</div>';
+  html+='<div class="c" style="font-size:22px;line-height:1.15"><strong>'+(batch.tableNom||'—')+'</strong></div>';
+  html+='<div class="c" style="font-size:14px;margin-top:2px">'+(batch.srv||'—')+'</div>';
   html+='<div class="sep"></div>';
-  html+=ligne('N° Commande','<strong>'+attId+'</strong>');
-  html+=ligne('Heure',batch.heure||'');
+  html+=ligneG('N° Commande','<strong>'+attId+'</strong>');
+  html+=ligneG('Heure',batch.heure||'');
   html+='<div class="sep"></div>';
   (batch.items||[]).forEach(function(it){
-    html+='<div style="font-size:15px;padding:2px 0">▸ '+(it.qty||it.qt||1)+'x '+it.nom+'</div>';
+    html+='<div style="font-size:12px;padding:1px 0">'+(it.qty||it.qt||1)+'x '+it.nom+'</div>';
   });
   html+='<div class="sep"></div>';
   html+='<div class="c" style="font-size:10px">Impression automatique — poste serveur</div>';
@@ -1752,10 +1765,12 @@ function imprimerAddition(attId,nbParts,format){
   // déclenche jamais rien sur un TPE : c'était exactement le "la page ne m'a pas affiché l'écran
   // pour sélectionner 58mm/80mm" et l'addition qui ne sortait jamais réellement.
   var viaNatif=!!(window.electronAPI&&window.electronAPI.printSilent);
+  // Marges latérales réduites (1mm au lieu de 4mm) pour utiliser presque toute la largeur du
+  // rouleau 58mm au lieu de laisser une bande vide de chaque côté.
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:3mm 4mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm}'+
     'table{width:100%;border-collapse:collapse;margin:0}'+
     'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
@@ -1789,7 +1804,9 @@ function imprimerAddition(attId,nbParts,format){
         html+=ligne(qty+'x '+it.nom,(it.pv*qty).toLocaleString('fr-FR')+' F');
       });
       html+='<div class="sep"></div>';
-      html+='<div style="font-size:13px">'+ligne('<strong>TOTAL À PAYER</strong>','<strong>'+ttc.toLocaleString('fr-FR')+' F</strong>')+'</div>';
+      // Montant collé au libellé, à gauche, plutôt qu'étiré jusqu'au bord droit du ticket (comme
+      // pour les infos d'en-tête) — plus lisible qu'un total éloigné dans le coin.
+      html+='<div style="font-size:13px;text-align:left"><strong>TOTAL À PAYER : '+ttc.toLocaleString('fr-FR')+' F</strong></div>';
     }else{
       // Addition divisée : chaque exemplaire affiche sa part, pas la liste
       // complète des articles (chaque groupe paiera sa portion séparément).
@@ -2402,10 +2419,12 @@ function imprimerRecu(format){
   // (pas de pont natif), on garde l'ancien flux fenêtre + window.print().
   var viaNatif=!!(window.electronAPI&&window.electronAPI.printSilent);
   var w=viaNatif?null:window.open('','_blank','width=420,height=700');
+  // Marges latérales réduites (1mm au lieu de 4mm) pour utiliser presque toute la largeur du
+  // rouleau 58mm au lieu de laisser une bande vide de chaque côté.
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:3mm 4mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm}'+
     'table{width:100%;border-collapse:collapse;margin:0}'+
     'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
@@ -2462,7 +2481,8 @@ function imprimerRecu(format){
       body+='<div class="sep"></div>';
       body+='<div style="font-size:15px">'+ligne('<span class="b">PART '+numeroPart+'/'+totalParts+'</span>','<span class="b">'+part.toLocaleString('fr-FR')+' F</span>')+'</div>';
     }else{
-      body+=ligne('<span class="b">TOTAL TTC</span>','<span class="b">'+tk.ttc.toLocaleString('fr-FR')+' F</span>');
+      // Montant collé au libellé, à gauche, plutôt qu'étiré jusqu'au bord droit du ticket.
+      body+='<div style="text-align:left"><span class="b">TOTAL TTC : '+tk.ttc.toLocaleString('fr-FR')+' F</span></div>';
     }
     body+='<div class="sep"></div>';
     body+='<div style="font-size:14px">'+ligne('<span class="b">Paiement</span>','<span class="b">'+tk.pay+'</span>')+'</div>';
