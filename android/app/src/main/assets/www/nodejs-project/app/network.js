@@ -14,6 +14,40 @@
   // (articles, catégories, etc. semblent alors "disparaître" pour tout le monde).
   var initialStateLoaded = false;
   var prevTxIds = null;
+  // --- Journal technique persistant --------------------------------------------------------
+  // Sans matériel de test disponible ni accès ADB, chaque nouvelle hypothèse sur le bon de
+  // commande manquant ne peut être vérifiée qu'en installant un build et en attendant un retour
+  // de l'utilisateur — lent, et sans aucune certitude sur ce qui échoue réellement en interne.
+  // Ce journal enregistre, avec horodatage, chaque étape du circuit d'impression automatique
+  // (réception d'un état, lots détectés comme nouveaux, tentative d'impression, résultat), pour
+  // que l'utilisateur puisse le consulter et le copier depuis Paramètres > Périphériques après
+  // un essai, sans outil technique — la seule vraie source d'information tant qu'on ne peut pas
+  // reproduire le problème directement.
+  var DEBUG_LOG_KEY = 'fss_debug_log_v1';
+  function fssLog(msg) {
+    try {
+      var raw = localStorage.getItem(DEBUG_LOG_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      if (!(arr instanceof Array)) arr = [];
+      var h = new Date();
+      var horodatage = ('0' + h.getHours()).slice(-2) + ':' + ('0' + h.getMinutes()).slice(-2) + ':' + ('0' + h.getSeconds()).slice(-2);
+      arr.push(horodatage + ' — ' + msg);
+      if (arr.length > 300) arr = arr.slice(arr.length - 300);
+      localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(arr));
+    } catch (e) { /* stockage indisponible : tant pis pour cette entrée */ }
+  }
+  window.fssLog = fssLog;
+  window.fssGetLog = function () {
+    try {
+      var raw = localStorage.getItem(DEBUG_LOG_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return (arr instanceof Array) ? arr.join('\n') : '';
+    } catch (e) { return ''; }
+  };
+  window.fssClearLog = function () {
+    try { localStorage.removeItem(DEBUG_LOG_KEY); } catch (e) {}
+  };
+  fssLog('--- démarrage appli --- rôle=' + (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '' ? 'Serveur' : 'Client') + ' host=' + location.hostname);
   // --- Suivi PERSISTANT des bons de commande déjà imprimés -----------------------------------
   // Avant : ce suivi (prevBatchIds) n'existait qu'en mémoire (variable JS). Sur du matériel
   // Android bas de gamme (type TPE H10S), le système tue très souvent l'activité/la WebView en
@@ -116,11 +150,13 @@
     cmdAttente = s.cmdAttente || [];
     printBatches = s.printBatches || [];
     var lotsConnus = chargerLotsImprimes();
+    fssLog('applyState: printBatches reçus=' + printBatches.length + ' lotsConnus=' + (lotsConnus === null ? 'null(1re sync)' : lotsConnus.length));
     if (lotsConnus === null) {
       // Première synchronisation jamais vue sur cet appareil (installation neuve, ou stockage
       // local effacé) : comme avant, on ne réimprime pas l'historique déjà présent au moment
       // de ce tout premier chargement — on le marque directement comme "déjà traité".
       sauverLotsImprimes(printBatches.map(function (bt) { return bt.batchId; }));
+      fssLog('applyState: 1re synchro sur cet appareil, ' + printBatches.length + ' lot(s) existants marqués comme déjà traités (non imprimés)');
     } else {
       // Même circuit, même écouteur pour tout ce qui doit s'imprimer côté Serveur : bon de
       // commande cuisine ET bilan de clôture — aucune différence de traitement entre les deux.
@@ -131,15 +167,19 @@
         if (window.FSS_IS_SERVER) return true;
         return bt.type !== 'cloture' && bt.posteId === window.FSS_POSTE_ID;
       });
+      fssLog('applyState: ' + nouveauxLots.length + ' nouveau(x) lot(s) à imprimer' + (nouveauxLots.length ? ' : ' + nouveauxLots.map(function(bt){return bt.batchId+'('+(bt.type||'commande')+')';}).join(', ') : ''));
       if (nouveauxLots.length) {
         nouveauxLots.forEach(function (batch) {
+          fssLog('impression: tentative lot ' + batch.batchId + ' type=' + (batch.type || 'commande') + ' table=' + (batch.tableNom || '?'));
           safe(function () {
             if (batch.type === 'cloture') {
               if (window.imprimerBilanClotureAuto) window.imprimerBilanClotureAuto(batch.snapshot);
+              else fssLog('impression: ERREUR imprimerBilanClotureAuto introuvable sur window');
             } else {
               if (window.imprimerTicketAttente) window.imprimerTicketAttente(batch);
+              else fssLog('impression: ERREUR imprimerTicketAttente introuvable sur window');
             }
-          });
+          }, 'lot ' + batch.batchId);
         });
         sauverLotsImprimes(lotsConnus.concat(nouveauxLots.map(function (bt) { return bt.batchId; })));
       }
@@ -177,15 +217,17 @@
     document.dispatchEvent(new Event('fss:ready'));
   }
 
-  function safe(fn) {
+  function safe(fn, label) {
     try {
       fn();
     } catch (e) {
       // Avant : erreur totalement avalée, sans aucune trace — un bon de commande qui échoue
       // pour une raison inattendue (autre que le fix ci-dessus) restait invisible pour
-      // toujours. On journalise maintenant dans la console (visible via un débogage distant)
-      // ET on tente un toast, qui reste utile si l'appli est au premier plan au moment de
-      // l'erreur (par ex. en cas de nouvelle anomalie non encore identifiée).
+      // toujours. On journalise maintenant dans le journal technique persistant (consultable
+      // depuis Paramètres > Périphériques) ET on tente un toast, utile si l'appli est au
+      // premier plan au moment de l'erreur.
+      var detail = (label ? label + ' : ' : '') + 'EXCEPTION ' + (e && e.message ? e.message : e) + (e && e.stack ? ' | ' + e.stack : '');
+      try { fssLog('safe(): ' + detail); } catch (e2) {}
       try { console.error('[fss-print]', e && e.message ? e.message : e); } catch (e2) {}
       try { if (window.toast) toast('⚠️ Erreur impression auto : ' + (e && e.message ? e.message : e), 'e'); } catch (e2) {}
     }

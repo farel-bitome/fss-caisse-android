@@ -787,6 +787,15 @@ td{padding:8px 11px;vertical-align:middle}
             <span id="devPrintStatus" style="font-size:12px;color:#888;align-self:center"></span>
           </div>
         </div>
+        <div class="ssect"><div class="ssti">🧾 Journal technique impression</div>
+          <div style="font-size:12px;color:#888;margin-bottom:10px">Historique détaillé de l'impression automatique des bons de commande (utile pour diagnostiquer un problème d'impression avec le support) — reste sur cet appareil, personne d'autre ne peut le voir.</div>
+          <textarea id="devPrintLog" readonly style="width:100%;height:180px;font:11px monospace;background:#111;color:#ddd;border:1px solid #333;border-radius:6px;padding:8px;white-space:pre;resize:vertical"></textarea>
+          <div style="display:flex;gap:10px;margin-top:8px">
+            <button class="btn btn-o sm" onclick="rafraichirJournalImpression()">🔄 Actualiser</button>
+            <button class="btn btn-o sm" onclick="copierJournalImpression()">📋 Copier</button>
+            <button class="btn btn-o sm" onclick="effacerJournalImpression()">🗑️ Effacer</button>
+          </div>
+        </div>
         <div class="ssect"><div class="ssti">📷 Lecteur de codes-barres</div>
           <div style="font-size:12px;color:#888;margin-bottom:14px">Le scanner caméra utilise l'API BarcodeDetector du navigateur (si disponible) ou un lecteur USB/Bluetooth en mode "clavier".</div>
           <div class="sg">
@@ -1354,7 +1363,7 @@ function goSub(page,sub,btn){
   if(page==='params'&&sub==='airtel')loadAirtelStatus();
   if(page==='params'&&sub==='sauv')renderHistoriqueSauvegardes();
   if(page==='params'&&sub==='cats')initCategories();
-  if(page==='params'&&sub==='dev')rafraichirInfoImprimanteTpe();
+  if(page==='params'&&sub==='dev'){rafraichirInfoImprimanteTpe();rafraichirJournalImpression();}
   if(page==='personnel'&&sub==='archives')renderArchives();
 }
 // Appelée par le bouton "← Retour" visible dans l'appli (à CHAQUE étape : pages ET
@@ -1447,6 +1456,30 @@ function demanderIgnorerOptimisationBatterie(){
     toast('Choisis "Autoriser" pour FSS-CAISSE TPE puis reviens dans l\'appli','s');
     setTimeout(rafraichirInfoImprimanteTpe,1500);
   });
+}
+function rafraichirJournalImpression(){
+  var ta=g('devPrintLog');
+  if(!ta)return;
+  ta.value=window.fssGetLog?(window.fssGetLog()||'(journal vide pour le moment)'):'(journal indisponible)';
+  ta.scrollTop=ta.scrollHeight;
+}
+function copierJournalImpression(){
+  var ta=g('devPrintLog');
+  if(!ta)return;
+  ta.select();
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(ta.value).then(function(){toast('Journal copié','s');}).catch(function(){document.execCommand('copy');toast('Journal copié','s');});
+    }else{
+      document.execCommand('copy');
+      toast('Journal copié','s');
+    }
+  }catch(e){toast('Impossible de copier : '+(e&&e.message?e.message:e),'e');}
+}
+function effacerJournalImpression(){
+  if(window.fssClearLog)window.fssClearLog();
+  rafraichirJournalImpression();
+  toast('Journal effacé','s');
 }
 function startClock(){
   function tick(){g('clk').textContent=new Date().toLocaleTimeString('fr-FR');}
@@ -1773,12 +1806,18 @@ function imprimerTicketAttente(batch){
   html+='</body></html>';
   // Impression automatique (déclenchée par la synchro réseau, voir network.js) — un échec
   // silencieux ici est le pire cas (le bon de commande cuisine ne sort jamais et personne ne le
-  // sait), donc on le signale quand même par un toast au lieu de l'ignorer.
+  // sait), donc on le signale quand même par un toast au lieu de l'ignorer, et on journalise
+  // chaque étape (voir journal technique, Paramètres > Périphériques).
+  if(window.fssLog)window.fssLog('imprimerTicketAttente: appel imprimerSilencieux, format='+fmt+', lot='+(batch.batchId||'?'));
   Promise.resolve(imprimerSilencieux(html,fmt)).then(function(r){
     if(r&&r.success===false){
+      if(window.fssLog)window.fssLog('imprimerTicketAttente: ÉCHEC — '+(r.error||'erreur inconnue'));
       toast('❌ Échec impression bon de commande : '+(r.error||'erreur inconnue'),'e');
+    }else{
+      if(window.fssLog)window.fssLog('imprimerTicketAttente: OK (succès rapporté par le pont natif)');
     }
   }).catch(function(e){
+    if(window.fssLog)window.fssLog('imprimerTicketAttente: EXCEPTION promesse — '+(e&&e.message?e.message:e));
     toast('❌ Échec impression bon de commande : '+(e&&e.message?e.message:e),'e');
   });
 }
@@ -1986,7 +2025,9 @@ function mettreEnAttente(){
   // deux mécanismes totalement indépendants dans le code : payer une commande
   // (valPay/imprimerRecu) n'appelle jamais cette fonction ni printBatches.
   if(deltaItems.length){
-    printBatches.push({batchId:id+'-'+Date.now(),attenteId:id,tableNom:tableNom,srv:srv,heure:heure,items:deltaItems,ajout:!!resumingAttenteId,posteId:window.FSS_POSTE_ID});
+    var nouveauLotImpression={batchId:id+'-'+Date.now(),attenteId:id,tableNom:tableNom,srv:srv,heure:heure,items:deltaItems,ajout:!!resumingAttenteId,posteId:window.FSS_POSTE_ID};
+    printBatches.push(nouveauLotImpression);
+    if(window.fssLog)window.fssLog('mettreEnAttente: nouveau lot créé localement '+nouveauLotImpression.batchId+' ('+deltaItems.length+' article(s)), en attente de synchro pour impression');
   }
   resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;
   libererTable();clearTk(true);
@@ -1997,6 +2038,7 @@ function mettreEnAttente(){
   // volontairement cmdAttente sur la route générique).
   if(window.fssEnvoyerCmdAttente)window.fssEnvoyerCmdAttente(nouvelleCommandeAttente);
   if(window.fssSyncPush)window.fssSyncPush();
+  if(window.fssLog)window.fssLog('mettreEnAttente: fssSyncPush() appelé (envoi du nouvel état, y compris printBatches, vers le serveur)');
 }
 function calcDeltaItems(sentQtyMap,currentItems){
   var delta=[];
