@@ -73,4 +73,9 @@
          qui pouvait ne jamais sortir sur certains TPE (voir HtmlToBitmap, point 4 de l'historique
          de classe, et FssNativeBridge#requestOverlayPermission). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Permet de proposer à l'utilisateur d'exclure l'appli de l'optimisation de batterie
+         (voir FssNativeBridge#requestIgnoreBatteryOptimizations) : réduit le risque que le
+         système tue l'activité/la WebView en arrière-plan sur les appareils avec une gestion
+         batterie agressive (cause probable des bons de commande automatiques manqués). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 </manifest>

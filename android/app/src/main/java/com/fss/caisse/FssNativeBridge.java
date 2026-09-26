@@ -304,11 +304,50 @@ public class FssNativeBridge {
                     // HtmlToBitmap. On l'expose ici pour que l'écran Paramètres puisse avertir
                     // l'utilisateur et proposer de l'accorder (voir requestOverlayPermission).
                     r.put("overlayPermissionGranted", HtmlToBitmap.hasOverlayPermission(context));
+                    // Sur certains appareils Android bas de gamme (ROM constructeur avec gestion
+                    // "auto-démarrage"/"appli protégée" très agressive), le système peut tuer toute
+                    // l'activité/la WebView en arrière-plan pour économiser la batterie — même avec
+                    // un foreground service actif (FssServerService) — ce qui peut faire "manquer"
+                    // silencieusement un bon de commande automatique en cours de route. Exclure
+                    // l'appli de l'optimisation de batterie réduit fortement ce risque. On l'expose
+                    // ici pour avertir l'utilisateur et proposer de l'accorder (voir
+                    // requestIgnoreBatteryOptimizations).
+                    boolean batteryOk = true;
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        android.os.PowerManager pm =
+                                (android.os.PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                        batteryOk = pm != null && pm.isIgnoringBatteryOptimizations(context.getPackageName());
+                    }
+                    r.put("batteryOptimizationIgnored", batteryOk);
                 } catch (Exception e) {
                     r.put("name", "Erreur de détection : " + e.getMessage());
                     r.put("available", false);
                 }
                 respond(callbackId, r);
+                break;
+            }
+            case "requestIgnoreBatteryOptimizations": {
+                // Permission "spéciale" elle aussi : il faut rediriger vers l'écran système dédié
+                // (impossible à accorder via ActivityCompat.requestPermissions).
+                android.app.Activity battActivity = activityRef.get();
+                if (battActivity == null || battActivity.isFinishing() || battActivity.isDestroyed()) {
+                    respond(callbackId, error("Fenêtre principale indisponible pour ouvrir ce réglage."));
+                    break;
+                }
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) {
+                    respond(callbackId, ok()); // Non applicable avant Android 6.
+                    break;
+                }
+                try {
+                    Intent intent = new Intent(
+                            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:" + context.getPackageName()));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    battActivity.startActivity(intent);
+                    respond(callbackId, ok());
+                } catch (Exception e) {
+                    respond(callbackId, error("Impossible d'ouvrir le réglage système : " + e.getMessage()));
+                }
                 break;
             }
             case "requestOverlayPermission": {

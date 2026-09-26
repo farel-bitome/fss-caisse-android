@@ -258,6 +258,11 @@
     // même écran éteint / appli en arrière-plan, notamment le bon de commande sur le poste
     // "Serveur").
     requestOverlayPermission: function () { return call('requestOverlayPermission', {}); },
+    // Ouvre l'écran système "Ignorer l'optimisation de batterie" pour ce TPE — voir
+    // getPrinterInfo().batteryOptimizationIgnored. Réduit le risque que le système tue
+    // l'activité/la WebView en arrière-plan sur certains appareils Android bas de gamme à
+    // gestion batterie agressive, cause probable de bons de commande automatiques manqués.
+    requestIgnoreBatteryOptimizations: function () { return call('requestIgnoreBatteryOptimizations', {}); },
     getServerIpInfo: function () { return call('getServerIpInfo', {}); },
     saveManualIp: function (ip, port) { return call('saveManualIp', { ip: ip, port: port }); },
     resetManualIp: function () { return call('resetManualIp', {}); },

@@ -777,6 +777,10 @@ td{padding:8px 11px;vertical-align:middle}
             <div id="devPrintTpeOverlayBtnWrap" style="display:none;margin-top:8px">
               <button class="btn btn-r sm" onclick="demanderPermissionAffichage()">Autoriser maintenant</button>
             </div>
+            <div style="margin-top:8px">Application exclue de l'optimisation de batterie (recommandé sur ce poste) : <strong id="devPrintTpeBattery">…</strong></div>
+            <div id="devPrintTpeBatteryBtnWrap" style="display:none;margin-top:8px">
+              <button class="btn btn-r sm" onclick="demanderIgnorerOptimisationBatterie()">Désactiver l'optimisation de batterie</button>
+            </div>
           </div>
           <div style="display:flex;gap:10px;margin-top:4px">
             <button class="btn btn-r" onclick="testPrint()">🖨️ Imprimer un test</button>
@@ -1406,6 +1410,14 @@ function rafraichirInfoImprimanteTpe(){
     var granted=r&&r.overlayPermissionGranted;
     if(overlayEl)overlayEl.textContent=granted?'✅ activée':'❌ non activée';
     if(overlayBtnWrap)overlayBtnWrap.style.display=granted?'none':'';
+    // Sur certains appareils bas de gamme, une gestion batterie très agressive peut tuer
+    // l'activité/la WebView en arrière-plan même avec le service de premier plan actif — ce qui
+    // peut faire "manquer" un bon de commande automatique en cours de route.
+    var battEl=g('devPrintTpeBattery');
+    var battBtnWrap=g('devPrintTpeBatteryBtnWrap');
+    var battOk=r&&r.batteryOptimizationIgnored;
+    if(battEl)battEl.textContent=battOk?'✅ oui':'❌ non';
+    if(battBtnWrap)battBtnWrap.style.display=battOk?'none':'';
   }).catch(function(){
     g('devPrintTpeNom').textContent='impossible à déterminer';
     var fmtEl=g('devPrintTpeFormat');
@@ -1422,6 +1434,17 @@ function demanderPermissionAffichage(){
     toast('Active l\'interrupteur pour FSS-CAISSE TPE puis reviens dans l\'appli','s');
     // Rafraîchit l'état affiché quand l'utilisateur revient sur cet écran après avoir accordé
     // (ou refusé) la permission dans les réglages système.
+    setTimeout(rafraichirInfoImprimanteTpe,1500);
+  });
+}
+function demanderIgnorerOptimisationBatterie(){
+  if(!(window.electronAPI&&window.electronAPI.requestIgnoreBatteryOptimizations)){toast('Fonction indisponible','e');return;}
+  window.electronAPI.requestIgnoreBatteryOptimizations().then(function(r){
+    if(r&&r.success===false){
+      toast('❌ '+(r.error||'Impossible d\'ouvrir le réglage'),'e');
+      return;
+    }
+    toast('Choisis "Autoriser" pour FSS-CAISSE TPE puis reviens dans l\'appli','s');
     setTimeout(rafraichirInfoImprimanteTpe,1500);
   });
 }
