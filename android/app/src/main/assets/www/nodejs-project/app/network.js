@@ -320,11 +320,34 @@
       safe(function () { toast('⚠️ Impossible de synchroniser la suppression — vérifiez la connexion', 'e'); });
     });
   }
+  // Envoie UN nouveau lot à imprimer (bon de commande ou bilan de clôture) via sa route dédiée
+  // du serveur, immédiatement — jamais via l'envoi de l'état complet (débounce de 150ms), pour
+  // exactement la même raison que cmdAttente ci-dessus. Sans cette route, le lot créé localement
+  // pouvait être silencieusement effacé de la mémoire du poste, avant même d'avoir été transmis
+  // au serveur, par l'écho de synchronisation d'une AUTRE action envoyée entre-temps (par ex.
+  // fssEnvoyerCmdAttente, qui répond quasi instantanément sur le poste "Serveur" en localhost) —
+  // voir le commentaire de /api/printbatch/ajouter dans embedded-server.js pour le détail complet
+  // de cette course, qui expliquait le bon de commande jamais imprimé sur ce poste précis.
+  function envoyerPrintBatch(batch) {
+    fssLog('envoyerPrintBatch: envoi immédiat du lot ' + (batch && batch.batchId) + ' vers /api/printbatch/ajouter');
+    return fetch('/api/printbatch/ajouter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(batch)
+    }).then(function (r) {
+      fssLog('envoyerPrintBatch: réponse serveur ok=' + (r && r.ok));
+      return r;
+    }).catch(function (e) {
+      fssLog('envoyerPrintBatch: EXCEPTION réseau — ' + (e && e.message ? e.message : e));
+      safe(function () { toast('⚠️ Impossible d\'envoyer le bon de commande au serveur — vérifiez la connexion', 'e'); });
+    });
+  }
 
   window.fssSyncPush = syncPush;
   window.fssSyncPushImmediate = syncPushImmediate;
   window.fssEnvoyerCmdAttente = envoyerCmdAttente;
   window.fssRetirerCmdAttente = retirerCmdAttente;
+  window.fssEnvoyerPrintBatch = envoyerPrintBatch;
   // Si l'app se ferme (fermeture manuelle, redémarrage...), on force
   // immédiatement l'envoi de tout changement en attente, et on prévient le
   // processus principal une fois que c'est VRAIMENT terminé (pas juste lancé)

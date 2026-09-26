@@ -2027,7 +2027,15 @@ function mettreEnAttente(){
   if(deltaItems.length){
     var nouveauLotImpression={batchId:id+'-'+Date.now(),attenteId:id,tableNom:tableNom,srv:srv,heure:heure,items:deltaItems,ajout:!!resumingAttenteId,posteId:window.FSS_POSTE_ID};
     printBatches.push(nouveauLotImpression);
-    if(window.fssLog)window.fssLog('mettreEnAttente: nouveau lot créé localement '+nouveauLotImpression.batchId+' ('+deltaItems.length+' article(s)), en attente de synchro pour impression');
+    if(window.fssLog)window.fssLog('mettreEnAttente: nouveau lot créé localement '+nouveauLotImpression.batchId+' ('+deltaItems.length+' article(s))');
+    // Envoyé IMMÉDIATEMENT via sa route dédiée (voir /api/printbatch/ajouter côté serveur), et
+    // non plus via l'envoi de l'état complet (fssSyncPush, différé de 150ms) : ce dernier pouvait
+    // arriver trop tard, après qu'un autre échange réseau presque instantané (l'écho de
+    // fssEnvoyerCmdAttente ci-dessous, en particulier sur le poste "Serveur" en localhost) ait
+    // déjà remplacé ce tableau par la version du serveur, effaçant ce lot avant même qu'il ait pu
+    // être transmis — c'était la vraie cause du bon de commande qui ne sortait jamais sur ce
+    // poste précis. Voir aussi le commentaire de embedded-server.js pour le détail complet.
+    if(window.fssEnvoyerPrintBatch)window.fssEnvoyerPrintBatch(nouveauLotImpression);
   }
   resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;
   libererTable();clearTk(true);
@@ -2038,7 +2046,6 @@ function mettreEnAttente(){
   // volontairement cmdAttente sur la route générique).
   if(window.fssEnvoyerCmdAttente)window.fssEnvoyerCmdAttente(nouvelleCommandeAttente);
   if(window.fssSyncPush)window.fssSyncPush();
-  if(window.fssLog)window.fssLog('mettreEnAttente: fssSyncPush() appelé (envoi du nouvel état, y compris printBatches, vers le serveur)');
 }
 function calcDeltaItems(sentQtyMap,currentItems){
   var delta=[];
@@ -3637,9 +3644,12 @@ function doCloture(){
   if(window.FSS_IS_SERVER){
     print80();
   }else{
-    printBatches.push({batchId:'CLO-'+Date.now(),type:'cloture',snapshot:snapshot});
-    if(window.fssSyncPushImmediate)window.fssSyncPushImmediate();
-    else if(window.fssSyncPush)window.fssSyncPush();
+    var lotCloture={batchId:'CLO-'+Date.now(),type:'cloture',snapshot:snapshot};
+    printBatches.push(lotCloture);
+    // Envoyé via la route dédiée /api/printbatch/ajouter — la route générique /api/state
+    // ignore désormais volontairement tout printBatches reçu (voir mettreEnAttente et
+    // embedded-server.js pour le détail de la course que cela évite).
+    if(window.fssEnvoyerPrintBatch)window.fssEnvoyerPrintBatch(lotCloture);
     toast('Ticket de clôture envoyé à l\'imprimante du serveur','i');
   }
   if(window.fssSyncPush)window.fssSyncPush();

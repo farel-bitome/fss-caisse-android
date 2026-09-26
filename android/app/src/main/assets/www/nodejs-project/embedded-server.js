@@ -208,6 +208,38 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
         res.status(500).json({ ok: false, error: e.message });
       }
     });
+    // ---- Bons de commande à imprimer : même principe que cmdAttente ci-dessus ----
+    // printBatches souffrait exactement du même problème que cmdAttente avant sa route dédiée :
+    // un nouveau lot était ajouté localement (voir mettreEnAttente côté client), PUIS le poste
+    // envoyait /api/cmdattente/ajouter (immédiat) ET /api/state (généré via un setTimeout de
+    // 150ms). Sur le poste "Serveur" (serveur embarqué en localhost, aller-retour quasi
+    // instantané), l'écho de /api/cmdattente/ajouter revenait TOUJOURS avant l'envoi différé de
+    // /api/state, et applyState() côté client REMPLAÇAIT alors printBatches par la version du
+    // serveur (qui ne contient pas encore le nouveau lot, cette route ne le touchant pas) —
+    // effaçant silencieusement le lot tout juste créé AVANT qu'il n'ait jamais été transmis au
+    // serveur. Résultat : le bon de commande n'était en réalité jamais envoyé du tout sur ce
+    // poste (d'où le journal technique montrant "printBatches reçus=0" à chaque fois, même après
+    // l'envoi). Un poste "Client" distant, avec un aller-retour réseau presque toujours plus long
+    // que 150ms, gagnait cette course la plupart du temps par pur hasard de timing — d'où le bon
+    // de commande qui fonctionnait sur un TPE client (Sunmi) mais jamais sur le TPE serveur
+    // (H10S). Fix : une route dédiée, immédiate, qui ne dépend d'aucun débounce ni d'aucune
+    // course avec un autre envoi.
+    expressApp.post('/api/printbatch/ajouter', (req, res) => {
+      try {
+        state.printBatches = state.printBatches || [];
+        state.printBatches.push(req.body);
+        if (state.printBatches.length > 200) {
+          state.printBatches = state.printBatches.slice(-200);
+        }
+        saveState(state);
+        io.emit('state:changed', state);
+        ecrireJournal('Lot à imprimer ajouté : ' + (req.body && req.body.batchId) + ' — total actuel : ' + state.printBatches.length);
+        res.json({ ok: true });
+      } catch (e) {
+        console.error('[FSS-CAISSE] Erreur ajout lot à imprimer :', e);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
     expressApp.post('/api/cmdattente/retirer', (req, res) => {
       try {
         state.cmdAttente = (state.cmdAttente || []).filter(function (c) { return c.id !== req.body.id; });
@@ -249,6 +281,11 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
         // on garde toujours la version déjà connue du serveur, gérée à part
         // via les routes /api/cmdattente/*.
         nouvelEtat.cmdAttente = state.cmdAttente || [];
+        // Même chose pour printBatches, désormais géré exclusivement via /api/printbatch/ajouter
+        // (voir son commentaire) — cette route ignore volontairement tout printBatches reçu ici,
+        // pour ne plus jamais pouvoir écraser un lot qui vient d'être ajouté par cette route
+        // dédiée juste avant.
+        nouvelEtat.printBatches = state.printBatches || [];
         if (state && Array.isArray(state.tables) && Array.isArray(nouvelEtat.tables)) {
           nouvelEtat.tables = fusionnerTables(state.tables, nouvelEtat.tables);
         }
@@ -259,15 +296,8 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
         // ailleurs) pouvait écraser un article tout juste mis à jour.
         // printBatches ne sert qu'à signaler aux postes (voir network.js) qu'un NOUVEAU bon de
         // commande cuisine/bar (ou bilan de clôture) vient d'arriver, pour qu'ils l'impriment une
-        // fois chacun. Une fois cet aller-retour fait, une entrée ancienne ne sert plus jamais à
-        // rien (un poste qui se reconnecte ne réimprime jamais l'historique — voir prevBatchIds
-        // initialisé à null). Sans purge, ce tableau grossirait indéfiniment avec l'usage (chaque
-        // envoi en cuisine, chaque clôture), alourdissant data.json et CHAQUE synchronisation
-        // /api/state (et le journal socket.io) un peu plus chaque jour. On ne garde que les
-        // entrées les plus récentes.
-        if (Array.isArray(nouvelEtat.printBatches) && nouvelEtat.printBatches.length > 200) {
-          nouvelEtat.printBatches = nouvelEtat.printBatches.slice(-200);
-        }
+        // fois chacun. La purge au-delà de 200 entrées se fait désormais directement dans
+        // /api/printbatch/ajouter, seule route qui le modifie encore.
         const ancienHorodatageArts = (state && state.artsUpdatedAt) || 0;
         const nouvelHorodatageArts = nouvelEtat.artsUpdatedAt || 0;
         if (ancienHorodatageArts > nouvelHorodatageArts) {
