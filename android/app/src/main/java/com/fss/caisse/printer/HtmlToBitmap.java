@@ -347,6 +347,23 @@ public class HtmlToBitmap {
     private static final int STABILITY_REQUIRED_CONSECUTIVE = 3;
     private static final int STABILITY_MAX_CHECKS = 50; // ~50 x 80ms = 4s max avant capture forcée
 
+    // Marge de sécurité ajoutée à la hauteur mesurée avant capture (voir applyMeasuredHeight) :
+    // observé sur le bilan de clôture (de très loin le ticket le plus long généré par l'appli —
+    // une ligne par vente de la journée ET une ligne par article vendu), dont le total ("SOLDE",
+    // tout en bas) pouvait manquer à l'impression alors que tout le reste du ticket sortait bien.
+    // La hauteur "stable" déterminée par getContentHeight() peut être atteinte un instant avant
+    // que la toute dernière portion du document (celle en bas, donc le total) n'ait fini d'être
+    // effectivement peinte par le moteur de rendu — quelques pixels de marge blanche en plus
+    // coûtent un peu de papier, mais garantissent que le bas du ticket n'est jamais rogné.
+    private static final int HEIGHT_SAFETY_MARGIN_PX = 32;
+
+    // Avant de capturer, on revérifie une dernière fois getContentHeight() après un délai plus
+    // long que l'intervalle normal de stabilisation — sur du contenu très long (bilan de
+    // clôture), une "stabilisation" pouvait sembler atteinte alors que le document continuait en
+    // réalité de grandir légèrement juste après. Si la hauteur a encore changé à cette dernière
+    // vérification, on retourne dans la boucle de stabilisation au lieu de capturer directement.
+    private static final int FINAL_CONFIRM_DELAY_MS = 200;
+
     /**
      * Interroge webView.getContentHeight() (hauteur RÉELLE du document HTML chargé, en pixels CSS,
      * indépendante des aléas du layout Android) à intervalles réguliers, jusqu'à ce qu'elle cesse
@@ -359,7 +376,7 @@ public class HtmlToBitmap {
         if (attempt >= STABILITY_MAX_CHECKS) {
             Log.w(TAG, "Délai d'attente de stabilisation du ticket dépassé — capture avec la "
                     + "dernière hauteur connue (" + lastContentHeightPx + "px) plutôt que d'échouer.");
-            applyMeasuredHeight(webView, widthPx, lastContentHeightPx);
+            applyMeasuredHeight(webView, widthPx, lastContentHeightPx + HEIGHT_SAFETY_MARGIN_PX);
             finishCapture(dismiss, webView, widthPx, callback);
             return;
         }
@@ -368,8 +385,7 @@ public class HtmlToBitmap {
             if (contentHeightPx > 0 && contentHeightPx == lastContentHeightPx) {
                 int newStableCount = stableCount + 1;
                 if (newStableCount >= STABILITY_REQUIRED_CONSECUTIVE) {
-                    applyMeasuredHeight(webView, widthPx, contentHeightPx);
-                    finishCapture(dismiss, webView, widthPx, callback);
+                    confirmThenCapture(dismiss, webView, widthPx, callback, contentHeightPx);
                     return;
                 }
                 waitForStableHeightThenCapture(dismiss, webView, widthPx, callback, attempt + 1, contentHeightPx, newStableCount);
@@ -377,6 +393,25 @@ public class HtmlToBitmap {
                 waitForStableHeightThenCapture(dismiss, webView, widthPx, callback, attempt + 1, contentHeightPx, 0);
             }
         }, STABILITY_CHECK_DELAY_MS);
+    }
+
+    /**
+     * Dernière vérification, après un délai plus long, avant de capturer — voir
+     * FINAL_CONFIRM_DELAY_MS. Si la hauteur a encore bougé entre-temps, on ne capture pas tout de
+     * suite : on relance la boucle de stabilisation normale avec cette nouvelle hauteur.
+     */
+    private static void confirmThenCapture(Runnable dismiss, WebView webView, int widthPx, Callback callback, int stableHeightPx) {
+        webView.postDelayed(() -> {
+            int recheckedHeightPx = Math.round(webView.getContentHeight() * webView.getScale());
+            if (recheckedHeightPx > 0 && recheckedHeightPx != stableHeightPx) {
+                Log.w(TAG, "Hauteur du ticket encore modifiée après stabilisation apparente ("
+                        + stableHeightPx + "px → " + recheckedHeightPx + "px) — nouvelle vérification.");
+                waitForStableHeightThenCapture(dismiss, webView, widthPx, callback, 0, recheckedHeightPx, 0);
+                return;
+            }
+            applyMeasuredHeight(webView, widthPx, stableHeightPx + HEIGHT_SAFETY_MARGIN_PX);
+            finishCapture(dismiss, webView, widthPx, callback);
+        }, FINAL_CONFIRM_DELAY_MS);
     }
 
     /**
