@@ -98,18 +98,66 @@ public class HtmlToBitmap {
     }
 
     /**
+     * Nombre total de tentatives (1 essai initial + ce nombre de reprises) quand le bitmap rendu
+     * semble raté (quasi vide, voir looksBlank ci-dessous) — voir renderWithRetry.
+     */
+    private static final int MAX_RENDER_ATTEMPTS = 3;
+
+    /**
      * @param context N'importe quel Context. Si la permission d'affichage par-dessus les autres
      *                 applications est accordée, une fenêtre système est créée directement à
      *                 partir du contexte applicatif (fonctionne même écran éteint / en arrière-
      *                 plan). Sinon, ce Context DOIT permettre de remonter jusqu'à une Activity
      *                 vivante et au premier plan (voir findActivity ci-dessous).
+     *
+     * Robustesse : sur un TPE dont l'écran reste éteint la plupart du temps (rôle "Serveur"), la
+     * fenêtre système (TYPE_APPLICATION_OVERLAY) n'est composée par le système que de façon moins
+     * fiable que sur un appareil classique, écran allumé — observé concrètement sur H10S : un
+     * rendu raté produit tantôt un artefact (ex. barre de défilement capturée), tantôt un bitmap
+     * quasiment blanc, de façon intermittente et sans schéma fixe. Plutôt que de traquer une par
+     * une chaque cause ponctuelle de rendu raté (whack-a-mole sans fin sur du matériel qu'on ne
+     * peut pas tester directement), on détecte le symptôme commun à toutes ces défaillances — un
+     * bitmap anormalement vide, voir looksBlank — et on relance ENTIÈREMENT le rendu (nouvelle
+     * WebView, nouvelle fenêtre) avant d'abandonner, ce qui absorbe la plupart des ratés
+     * transitoires de ce type. onSuspectBlank() n'est alors appelé qu'après épuisement de toutes
+     * les tentatives, pour ne signaler que les échecs qui persistent réellement.
      */
     public static void render(Context context, String html, int widthPx, @NonNull Callback callback) {
+        renderWithRetry(context, html, widthPx, callback, 1);
+    }
+
+    private static void renderWithRetry(Context context, String html, int widthPx, @NonNull Callback callback, int attempt) {
         android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
         main.post(() -> {
+            Callback wrapped = new Callback() {
+                @Override
+                public void onBitmap(Bitmap bitmap) {
+                    if (looksBlank(bitmap) && attempt < MAX_RENDER_ATTEMPTS) {
+                        Log.w(TAG, "Rendu n°" + attempt + " quasi vide — nouvelle tentative complète ("
+                                + (attempt + 1) + "/" + MAX_RENDER_ATTEMPTS + ").");
+                        try { bitmap.recycle(); } catch (Exception ignored) {}
+                        renderWithRetry(context, html, widthPx, callback, attempt + 1);
+                        return;
+                    }
+                    callback.onBitmap(bitmap);
+                }
+
+                @Override
+                public void onError(String message) {
+                    callback.onError(message);
+                }
+
+                @Override
+                public void onSuspectBlank() {
+                    // Volontairement ignoré ici : la détection se fait dans onBitmap ci-dessus,
+                    // sur le bitmap RÉELLEMENT retenu après toutes les tentatives — sinon un
+                    // premier essai raté (mais réussi à la reprise suivante) déclencherait quand
+                    // même un avertissement trompeur pour un ticket finalement imprimé correctement.
+                }
+            };
             Context appContext = context.getApplicationContext();
             if (hasOverlayPermission(appContext)) {
-                renderViaOverlayWindow(appContext, html, widthPx, callback);
+                renderViaOverlayWindow(appContext, html, widthPx, wrapped);
                 return;
             }
             Activity activity = findActivity(context);
@@ -121,7 +169,7 @@ public class HtmlToBitmap {
                         + "Voir Paramètres > Périphériques pour l'accorder.");
                 return;
             }
-            renderViaActivityDialog(activity, html, widthPx, callback);
+            renderViaActivityDialog(activity, html, widthPx, wrapped);
         });
     }
 
