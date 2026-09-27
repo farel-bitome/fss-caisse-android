@@ -333,7 +333,7 @@ td{padding:8px 11px;vertical-align:middle}
       <div class="pbts">
         <button class="pbt pbt-e" id="btnPayEsp" onclick="openPay('esp')">💵 Espèces</button>
         <button class="pbt pbt-c" id="btnPayCarte" onclick="openPay('cart')">💳 Carte</button>
-        <button class="pbt-a" id="btnPayAirtel" style="background:#1F7A3A;border-color:#1F7A3A;color:#fff" onclick="openPay('momo')">📱 Mobile Money</button>
+        <button class="pbt-a" id="btnPayAirtel" style="background:#CC0000;border-color:#CC0000;color:#fff" onclick="openPay('airtel')">📱 Airtel Money</button>
         <button class="pbt-a" id="btnEnAttente" style="background:#1a1a00;border-color:#888;color:#FFCC00" onclick="mettreEnAttente()">⏸ En attente</button>
         <button class="pbt-a" onclick="clearTk()">🗑️ Annuler</button>
       </div>
@@ -615,9 +615,8 @@ td{padding:8px 11px;vertical-align:middle}
         <div class="cln"><span>Total encaissements</span><span id="cl2" style="color:#4488FF">0 FCFA</span></div>
         <div class="cln"><span>Dont espèces</span><span id="cl3">0 FCFA</span></div>
         <div class="cln"><span>Dont carte</span><span id="cl4">0 FCFA</span></div>
-        <div class="cln"><span>Dont Mobile Money</span><span id="cl4m">0 FCFA</span></div>
         <div class="cln"><span>Prélèvements</span><span id="cl5" style="color:#FF4444">0 FCFA</span></div>
-        <div class="cln" style="font-weight:700;color:#CC0000;font-size:14px;padding-top:8px"><span>Solde espèces (tiroir)</span><span id="cl6">50 000 FCFA</span></div>
+        <div class="cln" style="font-weight:700;color:#CC0000;font-size:14px;padding-top:8px"><span>Solde de caisse</span><span id="cl6">50 000 FCFA</span></div>
       </div>
       <div class="ccard"><div class="ccti">📊 Ventes &amp; Tickets</div>
         <div class="cln"><span>Nombre de tickets</span><span id="cn1">0</span></div>
@@ -725,22 +724,20 @@ td{padding:8px 11px;vertical-align:middle}
     </div>
     <div class="sub" id="sub-params-airtel">
       <div class="slay"><div class="ssect">
-        <div class="ssti">📱 Paiement mobile — Airtel Money &amp; Moov Money (PVIT)</div>
+        <div class="ssti">📱 Paiement mobile — Airtel Money</div>
         <div style="font-size:12px;color:#888;margin-bottom:16px;line-height:1.5">
-          Les paiements passent par le relais <strong>FSS-PAY</strong> de FALLSERVICES&amp;SOLUTIONS INFO, relié à votre compte marchand PVIT.
-          L'adresse et la clé ci-dessous sont enregistrées uniquement sur ce serveur de caisse : les autres postes et TPE n'y ont jamais accès.
+          Ces identifiants viennent du <strong>portail développeur Airtel Africa</strong>, une fois votre compte Marchand Airtel Money créé.
+          Ils sont enregistrés uniquement sur ce PC serveur, jamais transmis ailleurs.
         </div>
-        <div id="pvitStatusBox" style="padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:12px;font-weight:700"></div>
+        <div id="airtelStatusBox" style="padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:12px;font-weight:700"></div>
         <div class="sg">
-          <div class="fg"><label class="fl">Adresse du relais FSS-PAY</label><input class="fi" id="pvitRelais" placeholder="https://pay.mondomaine.com" autocomplete="off"></div>
-          <div class="fg"><label class="fl">Clé de ce terminal</label><input class="fi" type="password" id="pvitCle" placeholder="Laisser vide pour garder la clé actuelle" autocomplete="off"></div>
+          <div class="fg"><label class="fl">Client ID</label><input class="fi" id="atClientId" placeholder="Fourni par Airtel Africa"></div>
+          <div class="fg"><label class="fl">Client Secret</label><input class="fi" type="password" id="atClientSecret" placeholder="••••••••"></div>
+          <div class="fg"><label class="fl">Pays</label><select class="fi" id="atCountry"><option value="GA">Gabon (GA)</option><option value="CD">RD Congo (CD)</option><option value="KE">Kenya (KE)</option></select></div>
+          <div class="fg"><label class="fl">Devise</label><input class="fi" id="atCurrency" value="XAF"></div>
+          <div class="fg"><label class="fl">Environnement</label><select class="fi" id="atEnv"><option value="staging">Test (staging)</option><option value="production">Production (réel)</option></select></div>
         </div>
-        <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
-          <button class="btn btn-r" onclick="savePvitConfig()">💾 Enregistrer</button>
-          <button class="btn btn-o" onclick="testerPvit()">🔌 Tester la connexion</button>
-          <button class="btn btn-o" onclick="voirPaiementsMomo()">📋 Paiements du jour</button>
-        </div>
-        <div id="pvitTestBox" style="font-size:12px;margin-top:12px;line-height:1.6"></div>
+        <div style="display:flex;gap:10px;margin-top:10px"><button class="btn btn-r" onclick="saveAirtelConfig()">💾 Enregistrer</button></div>
       </div></div>
     </div>
     <div class="sub" id="sub-params-opts">
@@ -1363,7 +1360,7 @@ function goSub(page,sub,btn){
   var top=navHistory[navHistory.length-1];
   if(!(top.type==='sub'&&top.page===page&&top.sub===sub))navHistory.push({type:'sub',page:page,sub:sub});
   majBoutonRetourApp();
-  if(page==='params'&&sub==='airtel')loadPvitStatus();
+  if(page==='params'&&sub==='airtel')loadAirtelStatus();
   if(page==='params'&&sub==='sauv')renderHistoriqueSauvegardes();
   if(page==='params'&&sub==='cats')initCategories();
   if(page==='params'&&sub==='dev'){rafraichirInfoImprimanteTpe();rafraichirJournalImpression();}
@@ -1770,7 +1767,7 @@ function imprimerTicketAttente(batch){
   var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm;-webkit-text-stroke:0.35px currentColor}'+
     'table{width:100%;border-collapse:collapse;margin:0}'+
     'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
@@ -1860,7 +1857,7 @@ function imprimerAddition(attId,nbParts,format){
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm;-webkit-text-stroke:0.35px currentColor}'+
     'table{width:100%;border-collapse:collapse;margin:0}'+
     'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
@@ -2398,7 +2395,6 @@ function openPay(mode){
   var cxVal=g('selCaisse')?g('selCaisse').value:'';
   if(!cxVal){toast('Veuillez sélectionner une caisse avant de facturer','e');return;}
   if(mode==='airtel'){ouvrirAirtelModal();return;}
-  if(mode==='momo'){payerMobileMoney();return;}
   payMode=mode;recAmt=0;
   if(g('nbTicketsVal'))g('nbTicketsVal').textContent=nbTickets;
   if(g('chkDiviserAddition'))g('chkDiviserAddition').checked=false;
@@ -2441,8 +2437,7 @@ function valPay(){
   var rendu=payMode==='esp'?Math.max(0,recAmt-tot):0;
   var caissier=(window.currentUser&&window.currentUser.nom)?window.currentUser.nom:'—';
   var caisseNom=g('selCaisse')?g('selCaisse').value:'';
-  txs.unshift({id:'TK-'+('000'+nextTk).slice(-4),date:dd+'/'+mm+' '+hh+':'+mi,tbl:tableNomAffiche(),srv:g('selSrv').value,caissier:caissier,caisse:caisseNom,arts:nb,items:itemsSnapshot,ttc:tot,pay:payMode==='esp'?'Espèces':(payMode==='airtel'?'Airtel Money':(payMode==='momo'?libelleMomo(paiementMomo):'Carte')),recu:recu,rendu:rendu,stat:'Validé',momo:payMode==='momo'?detailsMomo(paiementMomo):undefined});
-  paiementMomo=null;
+  txs.unshift({id:'TK-'+('000'+nextTk).slice(-4),date:dd+'/'+mm+' '+hh+':'+mi,tbl:tableNomAffiche(),srv:g('selSrv').value,caissier:caissier,caisse:caisseNom,arts:nb,items:itemsSnapshot,ttc:tot,pay:payMode==='esp'?'Espèces':(payMode==='airtel'?'Airtel Money':'Carte'),recu:recu,rendu:rendu,stat:'Validé'});
   nextTk++;g('tkNum').textContent='TK-#'+('000'+nextTk).slice(-4);
   resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;
   closeM('ovPay');clearTk(true);libererTable();renderProds('');renderStk();renderTkList();renderRap();initCloture();
@@ -2476,10 +2471,6 @@ function afficherRecu(tk){
   lignes+='<div style="display:flex;justify-content:space-between;font-weight:900;font-size:12px;margin-top:4px"><span>TOTAL</span><span>'+tk.ttc.toLocaleString('fr-FR')+' F</span></div>';
   lignes+='<div style="border-top:1px dashed #000;margin:6px 0"></div>';
   lignes+='<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:900"><span>Paiement</span><span>'+tk.pay+'</span></div>';
-  if(tk.momo){
-    lignes+='<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;margin-top:2px"><span>Téléphone</span><span>'+tk.momo.tel+'</span></div>';
-    lignes+='<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700"><span>Réf. PVIT</span><span>'+tk.momo.ref+'</span></div>';
-  }
   if(tk.pay==='Espèces'&&tk.recu){
     lignes+='<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;margin-top:2px"><span>Montant reçu</span><span>'+tk.recu.toLocaleString('fr-FR')+' F</span></div>';
     lignes+='<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700"><span>Monnaie rendue</span><span>'+(tk.rendu||0).toLocaleString('fr-FR')+' F</span></div>';
@@ -2530,7 +2521,7 @@ function imprimerRecu(format){
   var css='@page{size:'+format+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 1mm;-webkit-text-stroke:0.35px currentColor}'+
     'table{width:100%;border-collapse:collapse;margin:0}'+
     'td{padding:0;vertical-align:top}'+
     'td.l{text-align:left}'+
@@ -2592,10 +2583,6 @@ function imprimerRecu(format){
     }
     body+='<div class="sep"></div>';
     body+='<div style="font-size:14px">'+ligne('<span class="b">Paiement</span>','<span class="b">'+tk.pay+'</span>')+'</div>';
-    if(tk.momo){
-      body+=ligne('Téléphone',tk.momo.tel);
-      body+=ligne('Réf. PVIT',tk.momo.ref);
-    }
     if(!diviser&&tk.pay==='Espèces'&&tk.recu){
       body+=ligne('Montant reçu',tk.recu.toLocaleString('fr-FR')+' F');
       body+=ligne('Monnaie rendue',(tk.rendu||0).toLocaleString('fr-FR')+' F');
@@ -3510,8 +3497,6 @@ function renderCloCaisseSelect(){
   });
   if(sel.querySelector('option[value="'+CSS.escape(prev)+'"]'))sel.value=prev;
 }
-function especesDe(tl){return tl.filter(function(t){return t.pay==='Espèces';}).reduce(function(s,t){return s+t.ttc;},0);}
-function mobileMoneyDe(tl){return tl.filter(function(t){return !!t.momo||t.pay==='Airtel Money'||t.pay==='Moov Money';}).reduce(function(s,t){return s+t.ttc;},0);}
 function txsCloture(){
   var f=g('cloCaisse')?g('cloCaisse').value:'';
   return f?txs.filter(function(t){return t.caisse===f;}):txs;
@@ -3523,12 +3508,10 @@ function initCloture(){
   var tl=txsCloture();
   var esp=tl.filter(function(t){return t.pay==='Espèces';}).reduce(function(s,t){return s+t.ttc;},0);
   var cart=tl.filter(function(t){return t.pay==='Carte';}).reduce(function(s,t){return s+t.ttc;},0);
-  var momo=mobileMoneyDe(tl);
-  if(g('cl4m'))g('cl4m').textContent=fmt(momo);
   var ttc=tl.reduce(function(s,t){return s+t.ttc;},0),nb=tl.reduce(function(s,t){return s+t.arts;},0);
   var tp=prls.reduce(function(s,p){return s+p.mnt;},0);
   if(g('clFondsOuv'))g('clFondsOuv').textContent=fmt(fonds);
-  g('cl2').textContent=fmt(ttc);g('cl3').textContent=fmt(esp);g('cl4').textContent=fmt(cart);g('cl5').textContent=fmt(tp);g('cl6').textContent=fmt(fonds+esp-tp);
+  g('cl2').textContent=fmt(ttc);g('cl3').textContent=fmt(esp);g('cl4').textContent=fmt(cart);g('cl5').textContent=fmt(tp);g('cl6').textContent=fmt(fonds+ttc-tp);
   g('cn1').textContent=tl.length;g('cn2').textContent=nb;g('cn3').textContent=tl.length?fmt(Math.round(ttc/tl.length)):fmt(0);g('cn6').textContent=fmt(ttc);
   if(g('clDate'))g('clDate').textContent=new Date().toLocaleDateString('fr-FR');
   renderPrls();calcCpt();
@@ -3537,8 +3520,7 @@ function addPrel(){
   var rawMnt=(g('prelMnt').value||'').replace(/[^\d]/g,'');
   var mnt=parseInt(rawMnt)||0,motif=g('prelMotif').value.trim()||'Prélèvement';
   if(!mnt){toast('Montant requis','e');return;}
-  // Seules les espèces sont physiquement dans le tiroir (pas la carte ni le Mobile Money)
-  var ca=especesDe(txsCloture());
+  var ca=txsCloture().reduce(function(s,t){return s+t.ttc;},0);
   var dejaPrel=prls.reduce(function(s,p){return s+p.mnt;},0);
   var solde=ca-dejaPrel;
   if(solde<=0){toast('❌ Caisse à zéro — prélèvement impossible','e');return;}
@@ -3579,7 +3561,7 @@ function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
   var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:700;padding:2mm 3mm}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor}'+
     'table{width:100%;border-collapse:collapse;margin:1px 0;table-layout:fixed}'+
     'td{padding:1px 0;overflow-wrap:break-word;word-break:break-word}'+
     'td.r{text-align:right;white-space:nowrap}'+
@@ -3650,7 +3632,7 @@ function doCloture(){
     nbTickets:snapshot.tl.length,
     ttc:snapshot.ttc,
     prelevements:snapshot.tp,
-    solde:especesDe(snapshot.tl)-snapshot.tp,
+    solde:snapshot.ttc-snapshot.tp,
     snapshot:snapshot
   });
   // Impression automatique du bilan de clôture complet (ticket 80mm) :
@@ -3756,7 +3738,7 @@ function razCaisse(){
     toast('Caisse remise à zéro','s');
   });
 }
-function calcCpt(){var tot=(parseInt(g('b10').value)||0)*10000+(parseInt(g('b5').value)||0)*5000+(parseInt(g('b2').value)||0)*2000+(parseInt(g('b1').value)||0)*1000+(parseInt(g('p500').value)||0)*500+(parseInt(g('p250').value)||0)*250;var f=g('cloCaisse')?g('cloCaisse').value:'';var fonds=getFondsOuverture(f);var j=especesDe(txsCloture())+fonds-prls.reduce(function(s,p){return s+p.mnt;},0);var ec=tot-j;g('cptTot').textContent=fmt(tot);g('cptEcart').textContent=(ec>=0?'+':'')+fmt(ec);g('cptEcart').style.color=ec===0?'#4488FF':ec<0?'#FF4444':'#CC0000';}
+function calcCpt(){var tot=(parseInt(g('b10').value)||0)*10000+(parseInt(g('b5').value)||0)*5000+(parseInt(g('b2').value)||0)*2000+(parseInt(g('b1').value)||0)*1000+(parseInt(g('p500').value)||0)*500+(parseInt(g('p250').value)||0)*250;var f=g('cloCaisse')?g('cloCaisse').value:'';var fonds=getFondsOuverture(f);var j=txsCloture().reduce(function(s,t){return s+t.ttc;},0)+fonds-prls.reduce(function(s,p){return s+p.mnt;},0);var ec=tot-j;g('cptTot').textContent=fmt(tot);g('cptEcart').textContent=(ec>=0?'+':'')+fmt(ec);g('cptEcart').style.color=ec===0?'#4488FF':ec<0?'#FF4444':'#CC0000';}
 // Construit le HTML du bilan de clôture à partir d'un instantané de données
 // (pas d'accès au DOM ici) — réutilisé à la fois pour l'impression locale et
 // pour l'impression automatique routée vers le poste Serveur.
@@ -3781,57 +3763,59 @@ function buildBilanClotureHTML(snapshot,fmt){
     return {nom:parArticle[cle].nom,qty:parArticle[cle].qty,total:parArticle[cle].total};
   }).sort(function(a,b){return b.qty-a.qty;});
 
+  // Même police/graisse que les autres tickets de cette caisse (bon de commande, addition,
+  // reçu) : 11px, gras maximal (900). En revanche, CONTRAIREMENT aux autres tickets (qui ont peu
+  // de lignes), le bilan de clôture peut contenir des dizaines de lignes (une par transaction +
+  // une par article vendu dans la journée) — avec un tableau à largeur "libre" (auto), le moteur
+  // de rendu de ce TPE bas de gamme n'a pas toujours le temps de calculer correctement la largeur
+  // de CHAQUE petit tableau avant la capture, ce qui a déjà fait disparaître des montants entiers
+  // à l'impression (colonne de droite vide). On fige donc les largeurs de colonnes
+  // (table-layout:fixed + largeurs en %), comme le faisait la version précédente de ce ticket —
+  // seule approche qui se soit montrée fiable pour ce ticket précis sur cet appareil — tout en
+  // gardant la police/graisse demandée, identique aux autres tickets.
   var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:9px;font-weight:700;padding:2mm 3mm}'+
-    'h2{text-align:center;font-size:12px;font-weight:900}'+
-    '.sep{border-top:1px dashed #000;margin:4px 0}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor}'+
     'table{width:100%;border-collapse:collapse;table-layout:fixed}'+
-    'td{padding:1px 0;overflow-wrap:break-word;word-break:break-word;font-size:9px}'+
-    '.r{text-align:right;white-space:nowrap;width:42%;font-size:9px}'+
-    '.tot{font-weight:900;font-size:11px}'+
-    '.center{text-align:center}'+
-    '.stit{font-size:9px;font-weight:900;margin-top:5px}';
+    'td{padding:1px 0;vertical-align:top;font-size:11px;font-weight:900}'+
+    'td.l{text-align:left;width:58%;overflow-wrap:break-word;word-break:break-word}'+
+    'td.r{text-align:right;width:42%;white-space:nowrap}'+
+    '.sep{border-top:1px dashed #000;margin:6px 0}'+
+    '.c{text-align:center}.b{font-weight:900}'+
+    '.stit{font-size:11px;font-weight:900;margin-top:5px}';
+  function ligne(label,val){
+    return '<table><tr><td class="l">'+label+'</td><td class="r">'+val+'</td></tr></table>';
+  }
 
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>';
-  html+='<h2>FSS-CAISSE</h2>';
-  html+='<div class="center" style="font-size:10px">CLÔTURE — '+cxLbl+'</div>';
-  html+='<div class="center" style="font-size:10px">'+now+'</div>';
-  if(snapshot.origine)html+='<div class="center" style="font-size:9px">Clôturé depuis : '+snapshot.origine+'</div>';
+  html+='<div class="c" style="font-size:16px"><strong>FSS-CAISSE</strong></div>';
+  html+='<div class="c" style="font-size:15px;margin:4px 0"><strong>CLÔTURE — '+cxLbl+'</strong></div>';
+  html+='<div class="c" style="font-size:11px">'+now+'</div>';
+  if(snapshot.origine)html+='<div class="c" style="font-size:10px">Clôturé depuis : '+snapshot.origine+'</div>';
   html+='<div class="sep"></div>';
 
-  html+='<table>';
   tl.forEach(function(t){
-    html+='<tr><td>'+t.id+'</td><td>'+t.date+'</td><td class="r">'+t.ttc.toLocaleString('fr-FR')+' F</td></tr>';
+    html+=ligne(t.id+' — '+t.date,t.ttc.toLocaleString('fr-FR')+' F');
   });
-  html+='</table>';
 
   html+='<div class="sep"></div>';
   html+='<div class="stit">DÉTAIL DES VENTES</div>';
   html+='<div class="sep"></div>';
-  html+='<table>';
   if(articlesTries.length){
     articlesTries.forEach(function(a){
-      html+='<tr><td>'+a.qty+'x '+a.nom+'</td><td class="r">'+a.total.toLocaleString('fr-FR')+' F</td></tr>';
+      html+=ligne(a.qty+'x '+a.nom,a.total.toLocaleString('fr-FR')+' F');
     });
   }else{
-    html+='<tr><td colspan="2" class="center">Aucune vente</td></tr>';
+    html+='<div class="c">Aucune vente</div>';
   }
-  html+='</table>';
 
   html+='<div class="sep"></div>';
-  html+='<table class="tot">';
-  html+='<tr><td>CA TTC</td><td class="r">'+ttc.toLocaleString('fr-FR')+' F</td></tr>';
-  var espT=especesDe(tl),momoT=mobileMoneyDe(tl),carteT=ttc-espT-momoT;
-  html+='<tr><td>Dont espèces</td><td class="r">'+espT.toLocaleString('fr-FR')+' F</td></tr>';
-  if(carteT)html+='<tr><td>Dont carte</td><td class="r">'+carteT.toLocaleString('fr-FR')+' F</td></tr>';
-  if(momoT)html+='<tr><td>Dont Mobile Money</td><td class="r">'+momoT.toLocaleString('fr-FR')+' F</td></tr>';
-  if(tp)html+='<tr><td>Prélèvements</td><td class="r" style="color:red">-'+tp.toLocaleString('fr-FR')+' F</td></tr>';
-  html+='<tr><td>SOLDE ESPÈCES</td><td class="r">'+(espT-tp).toLocaleString('fr-FR')+' F</td></tr>';
-  html+='</table>';
+  html+=ligne('CA TTC','<span class="b">'+ttc.toLocaleString('fr-FR')+' F</span>');
+  if(tp)html+=ligne('Prélèvements','<span class="b" style="color:red">-'+tp.toLocaleString('fr-FR')+' F</span>');
+  html+='<div style="font-size:14px">'+ligne('<span class="b">SOLDE</span>','<span class="b">'+(ttc-tp).toLocaleString('fr-FR')+' F</span>')+'</div>';
   html+='<div class="sep"></div>';
-  html+='<div class="center" style="font-size:10px;margin-top:3px">Merci</div>';
+  html+='<div class="c" style="font-size:11px">Merci</div>';
   html+='</body></html>';
   return html;
 }
@@ -3852,7 +3836,7 @@ function construireInstantaneCloture(){
     origine:(window.currentUser&&window.currentUser.nom?window.currentUser.nom+' — ':'')+(window.FSS_IS_SERVER?'Poste Serveur':'Poste distant (client/mobile)')
   };
 }
-function ouvrirEtImprimerHTML(html,fmt){
+function ouvrirEtImprimerHTML(html,fmt,tentative){
   // Utilise le même mécanisme fiable que le bon de commande cuisine
   // (impression silencieuse native via Electron). L'ancienne méthode
   // (fenêtre popup + window.print()) échouait silencieusement quand elle était
@@ -3861,12 +3845,46 @@ function ouvrirEtImprimerHTML(html,fmt){
   // action directement initiée par un clic de l'utilisateur sur CE poste.
   // fmt : format papier ('58mm'/'80mm') de CE poste précis (voir formatPapierTpe) — utilisé par
   // défaut quand l'appelant n'en précise pas.
+  //
+  // Le ticket de clôture est le plus long de tous (une ligne par transaction + une ligne par
+  // article distinct de la journée) : sur certains appareils, le tout premier envoi échoue
+  // parfois de façon transitoire (le pilote/service imprimante n'a pas eu le temps de "chauffer"
+  // pour un aussi gros volume de données), alors qu'une réimpression immédiate réussit toujours.
+  // Plutôt que d'afficher directement une erreur à l'utilisateur pour un problème qui se résout
+  // de lui-même, on retente automatiquement une fois avant d'abandonner et d'afficher l'erreur.
+  tentative=tentative||1;
+  var MAX_TENTATIVES=3;
+  // Un document aussi long peut, sur cet appareil, rester bloqué en plein rendu sans jamais
+  // rappeler ni succès ni échec (ni erreur ni toast — c'est ce qui ressemblait à "rien ne se
+  // passe" lors de la toute première impression). On ne s'appuie donc plus uniquement sur la
+  // promesse d'imprimerSilencieux : si rien ne répond dans un délai raisonnable, on considère
+  // ça comme un échec et on retente, exactement comme pour un vrai échec signalé.
+  var TIMEOUT_MS=12000;
+  var reglee=false;
+  var chrono=setTimeout(function(){
+    if(reglee)return;
+    reglee=true;
+    if(window.fssLog)window.fssLog('ouvrirEtImprimerHTML: tentative '+tentative+' sans réponse après '+TIMEOUT_MS+'ms — considérée comme un échec');
+    relancerOuAbandonner('Aucune réponse de l\'imprimante (délai dépassé)');
+  },TIMEOUT_MS);
+  function relancerOuAbandonner(messageErreur){
+    if(tentative<MAX_TENTATIVES){
+      if(window.fssLog)window.fssLog('ouvrirEtImprimerHTML: échec tentative '+tentative+' ('+messageErreur+') — nouvelle tentative automatique');
+      setTimeout(function(){ouvrirEtImprimerHTML(html,fmt,tentative+1);},600);
+    }else{
+      toast('❌ Échec impression bilan de clôture : '+messageErreur,'e');
+    }
+  }
   Promise.resolve(imprimerSilencieux(html,fmt||formatPapierTpe())).then(function(r){
+    if(reglee)return;
+    reglee=true;clearTimeout(chrono);
     if(r&&r.success===false){
-      toast('❌ Échec impression bilan de clôture : '+(r.error||'erreur inconnue'),'e');
+      relancerOuAbandonner(r.error||'erreur inconnue');
     }
   }).catch(function(e){
-    toast('❌ Échec impression bilan de clôture : '+(e&&e.message?e.message:e),'e');
+    if(reglee)return;
+    reglee=true;clearTimeout(chrono);
+    relancerOuAbandonner(e&&e.message?e.message:e);
   });
 }
 // Appelée uniquement côté Serveur (voir network.js) quand une clôture a été
@@ -3878,7 +3896,7 @@ function imprimerBilanClotureAuto(snapshot){
   var fmt=formatPapierTpe();
   ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot,fmt),fmt);
 }
-function printA4(){var tl=txsCloture(),cxLbl=(g('cloCaisse')&&g('cloCaisse').value)||'Toutes les caisses',ttc=tl.reduce(function(s,t){return s+t.ttc;},0),tp=prls.reduce(function(s,p){return s+p.mnt;},0),w=window.open('','_blank'),now=new Date().toLocaleString('fr-FR');w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:11px;padding:20mm}h1{font-size:22px;color:#CC0000}h2{font-size:14px;margin:14px 0 6px}table{width:100%;border-collapse:collapse;margin-bottom:12px}th{background:#CC0000;color:#fff;padding:7px 10px;text-align:left}td{padding:6px 10px;border-bottom:1px solid #eee}tr:nth-child(even) td{background:#f9f9f9}.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}.kc{border:1px solid #ddd;border-radius:6px;padding:10px 14px}.kl{font-size:10px;color:#666;text-transform:uppercase}.kv{font-size:20px;font-weight:700;color:#CC0000}.sep{border-top:2px solid #CC0000;margin:14px 0}.footer{text-align:center;font-size:10px;color:#666;margin-top:20px}</style></head><body>');w.document.write('<h1>FSS-CAISSE</h1><div style="font-size:12px;color:#666">RAPPORT DE CLÔTURE — '+cxLbl+' — '+now+'</div><div class="sep"></div><div class="kpi"><div class="kc"><div class="kl">Tickets</div><div class="kv" style="color:#1144CC">'+tl.length+'</div></div><div class="kc"><div class="kl">Total</div><div class="kv">'+ttc.toLocaleString('fr-FR')+' F</div></div><div class="kc"><div class="kl">Solde espèces</div><div class="kv" style="color:#1144CC">'+(especesDe(tl)-tp).toLocaleString('fr-FR')+' F</div></div></div><h2>Transactions</h2><table><thead><tr><th>N° Ticket</th><th>Date</th><th>Table</th><th>Caisse</th><th>Montant</th><th>Paiement</th></tr></thead><tbody>');tl.forEach(function(t){w.document.write('<tr><td>'+t.id+'</td><td>'+t.date+'</td><td>'+t.tbl+'</td><td>'+(t.caisse||'—')+'</td><td><strong>'+t.ttc.toLocaleString('fr-FR')+'</strong></td><td>'+t.pay+'</td></tr>');});w.document.write('</tbody></table><div class="footer">FSS-CAISSE — '+now+'</div></body></html>');w.document.close();w.onafterprint=function(){w.close();};setTimeout(function(){w.print();},400);setTimeout(function(){if(!w.closed)w.close();},15000);}
+function printA4(){var tl=txsCloture(),cxLbl=(g('cloCaisse')&&g('cloCaisse').value)||'Toutes les caisses',ttc=tl.reduce(function(s,t){return s+t.ttc;},0),tp=prls.reduce(function(s,p){return s+p.mnt;},0),w=window.open('','_blank'),now=new Date().toLocaleString('fr-FR');w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:11px;padding:20mm}h1{font-size:22px;color:#CC0000}h2{font-size:14px;margin:14px 0 6px}table{width:100%;border-collapse:collapse;margin-bottom:12px}th{background:#CC0000;color:#fff;padding:7px 10px;text-align:left}td{padding:6px 10px;border-bottom:1px solid #eee}tr:nth-child(even) td{background:#f9f9f9}.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}.kc{border:1px solid #ddd;border-radius:6px;padding:10px 14px}.kl{font-size:10px;color:#666;text-transform:uppercase}.kv{font-size:20px;font-weight:700;color:#CC0000}.sep{border-top:2px solid #CC0000;margin:14px 0}.footer{text-align:center;font-size:10px;color:#666;margin-top:20px}</style></head><body>');w.document.write('<h1>FSS-CAISSE</h1><div style="font-size:12px;color:#666">RAPPORT DE CLÔTURE — '+cxLbl+' — '+now+'</div><div class="sep"></div><div class="kpi"><div class="kc"><div class="kl">Tickets</div><div class="kv" style="color:#1144CC">'+tl.length+'</div></div><div class="kc"><div class="kl">Total</div><div class="kv">'+ttc.toLocaleString('fr-FR')+' F</div></div><div class="kc"><div class="kl">Solde</div><div class="kv" style="color:#1144CC">'+(ttc-tp).toLocaleString('fr-FR')+' F</div></div></div><h2>Transactions</h2><table><thead><tr><th>N° Ticket</th><th>Date</th><th>Table</th><th>Caisse</th><th>Montant</th><th>Paiement</th></tr></thead><tbody>');tl.forEach(function(t){w.document.write('<tr><td>'+t.id+'</td><td>'+t.date+'</td><td>'+t.tbl+'</td><td>'+(t.caisse||'—')+'</td><td><strong>'+t.ttc.toLocaleString('fr-FR')+'</strong></td><td>'+t.pay+'</td></tr>');});w.document.write('</tbody></table><div class="footer">FSS-CAISSE — '+now+'</div></body></html>');w.document.close();w.onafterprint=function(){w.close();};setTimeout(function(){w.print();},400);setTimeout(function(){if(!w.closed)w.close();},15000);}
 
 // PARAMÈTRES
 var tables=[
@@ -4494,92 +4512,6 @@ function finaliserPaiementAirtel(){
   payMode='airtel';recAmt=getTotal();
   valPay();
 }
-// ======================= Mobile Money PVIT (Airtel Money / Moov Money) =======================
-// Le navigateur ne connaît ni la clé ni le relais : il passe par /api/pvit/proxy du serveur de caisse.
-var paiementMomo=null;
-function pvitPret(){
-  if(!window.FssPvit){toast('Module Mobile Money absent (fss-pvit.js)','e');return false;}
-  FssPvit.configurer({proxy:'/api/pvit/proxy'},{memoriser:false});
-  return true;
-}
-function libelleMomo(p){
-  if(!p)return 'Mobile Money';
-  return p.operateur==='moov'?'Moov Money':(p.operateur==='airtel'?'Airtel Money':'Mobile Money');
-}
-function detailsMomo(p){
-  if(!p)return undefined;
-  return {operateur:p.operateur,tel:FssPvit.outils.telMasque(p.telephone),ref:p.transactionId||'-',refFss:p.reference,montant:p.montant};
-}
-function payerMobileMoney(){
-  if(!pvitPret())return;
-  var tot=getTotal();
-  if(!(tot>0)){toast('Montant invalide','e');return;}
-  var caissier=(window.currentUser&&window.currentUser.nom)?window.currentUser.nom:'';
-  FssPvit.payer({montant:tot,ticket:'TK-'+('000'+nextTk).slice(-4),libelle:tableNomAffiche(),caissier:caissier}).then(function(r){
-    if(!r||!r.paye||!r.paiement)return;
-    if(Math.round(r.paiement.montant)!==Math.round(getTotal())){
-      toast('⚠️ Montant reçu ('+fmt(r.paiement.montant)+') différent du ticket ('+fmt(getTotal())+')','e');
-    }
-    paiementMomo=r.paiement;
-    payMode='momo';recAmt=getTotal();nbTickets=1;
-    valPay();
-  }).catch(function(e){toast(e.message||'Erreur Mobile Money','e');});
-}
-function loadPvitStatus(){
-  var box=g('pvitStatusBox');if(!box)return;
-  fetch('/api/pvit/config-status').then(function(r){return r.json();}).then(function(d){
-    if(g('pvitRelais')&&!g('pvitRelais').value)g('pvitRelais').value=d.relais||'';
-    if(d.configured){
-      box.style.background='#0a2a12';box.style.color='#44CC66';box.style.border='1px solid #1a5c30';
-      box.textContent='✓ Mobile Money configuré — relais '+d.relais+' (clé …'+d.cleFin+')';
-    }else{
-      box.style.background='#2a1a0a';box.style.color='#FFAA44';box.style.border='1px solid #5c3a1a';
-      box.textContent='⚠️ Mobile Money pas encore configuré — renseignez l\'adresse du relais et la clé du terminal';
-    }
-  }).catch(function(){box.textContent='Impossible de vérifier le statut (serveur non démarré ?)';});
-}
-function savePvitConfig(){
-  var u=window.currentUser;
-  if(!u||!(u.super||u.full)){toast('Réservé aux administrateurs','e');return;}
-  var body={relais:g('pvitRelais').value.trim(),cle:g('pvitCle').value.trim()};
-  if(!/^https?:\/\//i.test(body.relais)){toast('L\'adresse doit commencer par https://','e');return;}
-  fetch('/api/pvit/save-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(!d.ok){toast(d.erreur||'Erreur','e');return;}
-      toast('Configuration Mobile Money enregistrée','s');
-      g('pvitCle').value='';loadPvitStatus();
-    })
-    .catch(function(){toast('Erreur lors de l\'enregistrement','e');});
-}
-function testerPvit(){
-  if(!pvitPret())return;
-  var box=g('pvitTestBox');box.style.color='#aaa';box.textContent='Test en cours…';
-  FssPvit.api.sante().then(function(s){
-    if(!s||s.ok===false)throw new Error((s&&s.erreur)||'Relais injoignable');
-    if(!s.pvitConfigure)throw new Error('Relais joignable, mais PVIT n\'est pas encore configuré sur le relais');
-    return FssPvit.api.historique();
-  }).then(function(){
-    box.style.color='#44CC66';box.textContent='✓ Connexion réussie : ce serveur de caisse peut encaisser en Mobile Money.';
-  }).catch(function(e){box.style.color='#FF6655';box.textContent='✕ '+e.message;});
-}
-function heureLocaleMomo(d){
-  // Le relais enregistre les heures en UTC : conversion à l'heure du poste
-  var t=new Date(String(d||'').replace(' ','T')+'Z');
-  return isNaN(t)?'':t.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-}
-function voirPaiementsMomo(){
-  if(!pvitPret())return;
-  var box=g('pvitTestBox');box.style.color='#aaa';box.textContent='Chargement…';
-  FssPvit.api.historique(new Date().toISOString().slice(0,10),null,true).then(function(h){
-    var html='<strong>'+h.nombre+' opération(s) aujourd\'hui — encaissé : '+fmt(h.totalEncaisse)+'</strong>';
-    var noms={SUCCESS:'✓ payé',FAILED:'✕ refusé',PENDING:'… en attente',AMBIGUOUS:'? à vérifier'};
-    h.paiements.slice(0,50).forEach(function(p){
-      html+='<div style="display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #333;padding:3px 0"><span>'+heureLocaleMomo(p.creeLe)+' · '+libelleMomo(p)+' · '+FssPvit.outils.telMasque(p.telephone)+(p.ticket?' · '+p.ticket:'')+'</span><span>'+fmt(p.montant)+' '+(noms[p.statut]||p.statut)+'</span></div>';
-    });
-    box.style.color='#ddd';box.innerHTML=html;
-  }).catch(function(e){box.style.color='#FF6655';box.textContent='✕ '+e.message;});
-}
 function openAdminPwdConfirm(msg,btnLabel,action){
   var u=window.currentUser;
   if(!u||!(u.super||u.full)){toast('Action réservée aux administrateurs','e');return;}
@@ -5060,7 +4992,6 @@ document.addEventListener('DOMContentLoaded',function(){
 <script src="auth.js"></script>
 <script src="etab.js"></script>
 <script src="network.js"></script>
-<script src="fss-pvit.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

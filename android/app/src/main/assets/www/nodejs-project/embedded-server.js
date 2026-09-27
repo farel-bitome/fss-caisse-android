@@ -30,7 +30,6 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     }
     const defaultFile = path.join(appRootDir, 'server-data', 'data.default.json');
     const airtelConfigFile = path.join(userDataDir, 'airtel-config.json');
-    const pvitConfigFile = path.join(userDataDir, 'pvit-config.json');
 
     function loadState() {
       let state;
@@ -385,85 +384,6 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
       } catch (e) {
         res.status(500).json({ ok: false, error: e.message || 'Erreur Airtel Money' });
       }
-    });
-
-    // ---- Paiement Mobile Money PVIT (Airtel Money / Moov Money) via le relais FSS-PAY ----
-    // La clé du terminal est stockée ici, sur le serveur de caisse, et n'est JAMAIS envoyée au
-    // navigateur : les postes appellent /api/pvit/proxy/..., que ce serveur relaie vers FSS-PAY.
-    // Écrit sans fetch ni opérateurs récents (?. ??) : doit tourner aussi sur le Node 12 des TPE.
-    function loadPvitConfig() {
-      try {
-        if (fs.existsSync(pvitConfigFile)) return JSON.parse(fs.readFileSync(pvitConfigFile, 'utf8'));
-      } catch (e) { /* ignore */ }
-      return { relais: '', cle: '' };
-    }
-    function savePvitConfig(cfg) {
-      const tmp = pvitConfigFile + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
-      fs.renameSync(tmp, pvitConfigFile);
-    }
-    function appelRelaisPvit(cfg, methode, chemin, corps) {
-      return new Promise(function (resolve) {
-        var url;
-        try { url = new URL(cfg.relais.replace(/\/+$/, '') + '/api' + chemin); }
-        catch (e) { return resolve({ status: 400, body: { ok: false, erreur: 'Adresse du relais FSS-PAY invalide' } }); }
-        var lib = url.protocol === 'https:' ? require('https') : require('http');
-        var donnees = corps ? Buffer.from(JSON.stringify(corps)) : null;
-        var entetes = { 'Accept': 'application/json', 'X-FSS-Cle': cfg.cle };
-        if (donnees) { entetes['Content-Type'] = 'application/json'; entetes['Content-Length'] = donnees.length; }
-        var req = lib.request(url, { method: methode, headers: entetes, timeout: 30000 }, function (rep) {
-          var morceaux = [];
-          rep.on('data', function (c) { morceaux.push(c); });
-          rep.on('end', function () {
-            var texte = Buffer.concat(morceaux).toString('utf8');
-            var json;
-            try { json = JSON.parse(texte); } catch (e) { json = { ok: false, erreur: 'Réponse invalide du relais FSS-PAY' }; }
-            resolve({ status: rep.statusCode || 502, body: json });
-          });
-        });
-        req.on('timeout', function () { req.destroy(new Error('délai dépassé')); });
-        req.on('error', function (e) {
-          resolve({ status: 502, body: { ok: false, erreur: 'Relais FSS-PAY injoignable (' + e.message + '). Vérifiez la connexion Internet.' } });
-        });
-        if (donnees) req.write(donnees);
-        req.end();
-      });
-    }
-
-    expressApp.get('/api/pvit/config-status', (req, res) => {
-      const cfg = loadPvitConfig();
-      res.json({ configured: !!(cfg.relais && cfg.cle), relais: cfg.relais || '', cleFin: cfg.cle ? String(cfg.cle).slice(-4) : '' });
-    });
-
-    expressApp.post('/api/pvit/save-config', (req, res) => {
-      const b = req.body || {};
-      const actuel = loadPvitConfig();
-      const relais = String(b.relais || '').trim().replace(/\/+$/, '');
-      if (relais && !/^https?:\/\//i.test(relais)) return res.status(400).json({ ok: false, erreur: 'L\'adresse doit commencer par https://' });
-      // Clé laissée vide = on garde la clé déjà enregistrée
-      const cle = String(b.cle || '').trim() || actuel.cle || '';
-      savePvitConfig({ relais: relais, cle: cle });
-      ecrireJournal('PVIT : configuration du relais Mobile Money mise à jour (' + relais + ')');
-      res.json({ ok: true });
-    });
-
-    const PVIT_CHEMINS = /^\/(sante|kyc|frais|solde|paiements(\/[A-Za-z0-9_-]{1,40})?)$/;
-    expressApp.all('/api/pvit/proxy/*', async (req, res) => {
-      const chemin = '/' + req.params[0];
-      if (!PVIT_CHEMINS.test(chemin) || (req.method !== 'GET' && req.method !== 'POST')) {
-        return res.status(404).json({ ok: false, erreur: 'Route Mobile Money inconnue' });
-      }
-      const cfg = loadPvitConfig();
-      if (!cfg.relais || !cfg.cle) {
-        return res.status(400).json({ ok: false, erreur: 'Mobile Money non configuré (Paramètres > Paiement Mobile).' });
-      }
-      const i = req.originalUrl.indexOf('?');
-      const query = i >= 0 ? req.originalUrl.slice(i) : '';
-      const r = await appelRelaisPvit(cfg, req.method, chemin + query, req.method === 'POST' ? (req.body || {}) : null);
-      if (req.method === 'POST' && chemin === '/paiements' && r.body && r.body.paiement) {
-        ecrireJournal('PVIT : paiement ' + r.body.paiement.reference + ' ' + r.body.paiement.montant + ' F -> ' + r.body.paiement.statut);
-      }
-      res.status(r.status).json(r.body);
     });
 
     io.on('connection', (socket) => {
