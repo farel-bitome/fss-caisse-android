@@ -241,6 +241,18 @@ public class HtmlToBitmap {
         // Rendu logiciel : plus fiable pour un dessin manuel dans un Canvas hors écran que le
         // rendu matériel (qui peut produire un bitmap vide sur certains TPE).
         webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        // Sans ça, la barre de défilement verticale par défaut d'Android (normalement invisible
+        // à l'usage, masquée après un court délai) peut être capturée par webView.draw() si elle
+        // est encore visible pile au moment de la capture — ce qui produit un trait noir vertical
+        // sur le bord droit du ticket imprimé, de façon intermittente selon la longueur du
+        // contenu et le timing exact de la capture (observé sur bon de commande, contenu dont la
+        // hauteur varie le plus d'un ticket à l'autre). On désactive donc complètement les barres
+        // de défilement de cette WebView dédiée au rendu, qui n'est de toute façon jamais destinée
+        // à être vue ni manipulée par l'utilisateur.
+        webView.setVerticalScrollBarEnabled(false);
+        webView.setHorizontalScrollBarEnabled(false);
+        webView.setScrollbarFadingEnabled(false);
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
     }
 
     private static void prepareBeforeLoad(WebView webView, int widthPx) {
