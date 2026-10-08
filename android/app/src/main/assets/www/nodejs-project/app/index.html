@@ -3647,18 +3647,25 @@ function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
     '.stit{font-size:11px;font-weight:900;margin-top:5px}';
   function sp(t){return String(t).replace(/[\u202f\u00a0]/g,' ');}
   function ligne(l,v){return '<div class="row"><span class="v">'+sp(v)+'</span>'+l+'</div>';}
+  // Libellé et valeur COLLÉS l'un à l'autre (valeur juste après le libellé, pas repoussée à
+  // l'extrême droite) : demandé pour que le montant prélevé soit lu tout de suite à côté de
+  // "MONTANT". La valeur passe à la ligne si elle est trop longue, sans jamais être coupée.
+  function ligneG(l,v,largeurCh){
+    var lab=largeurCh?'<span style="display:inline-block;width:'+largeurCh+'ch">'+l+'</span>':l;
+    return '<div style="text-align:left;padding:1px 0">'+lab+' : '+sp(v)+'</div>';
+  }
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>';
   html+='<div class="c" style="font-size:13px">'+etab+'</div>';
   html+='<div class="c" style="font-size:11px;margin:3px 0">💸 PRÉLÈVEMENT</div>';
   html+='<div class="sep"></div>';
-  html+=ligne('Caisse',cxLbl);
-  html+=ligne('Heure',heure);
-  html+=ligne('Caissier',caissier);
-  html+=ligne('Motif',motif);
+  html+=ligneG('Caisse',cxLbl,8);
+  html+=ligneG('Heure',heure,8);
+  html+=ligneG('Caissier',caissier,8);
+  html+=ligneG('Motif',motif,8);
   html+='<div class="sep"></div>';
-  html+='<div style="font-size:13px">'+ligne('MONTANT','-'+fmt(mnt))+'</div>';
+  html+='<div style="font-size:14px">'+ligneG('MONTANT','-'+Math.round(mnt).toLocaleString('fr-FR')+' F')+'</div>';
   html+='<div class="sep"></div>';
-  html+=ligne('Solde restant',fmt(Math.max(0,nouveauSolde)));
+  html+=ligneG('Solde restant',Math.round(Math.max(0,nouveauSolde)).toLocaleString('fr-FR')+' F');
   // Détail de tout ce qui a été vendu depuis la dernière clôture, avec quantités
   // (même présentation que le ticket de clôture).
   html+='<div class="sep"></div>';
