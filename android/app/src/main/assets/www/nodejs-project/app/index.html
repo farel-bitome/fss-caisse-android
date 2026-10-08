@@ -602,12 +602,15 @@ td{padding:8px 11px;vertical-align:middle}
     <div class="stb">
       <span class="stit">🔒 Clôture de Caisse — <span id="clDate"></span></span>
       <select class="ms" id="cloCaisse" onchange="initCloture()"><option value="">Toutes les caisses</option></select>
+      <select class="ms" id="cloFormat" title="Format du ticket imprimé automatiquement à la clôture" onchange="enregistrerFormatCloture(this.value)"><option value="58mm">Ticket 58mm</option><option value="80mm">Ticket 80mm</option></select>
       <button class="btn btn-r" onclick="doCloture()">🔒 Clôturer</button>
       <button class="btn btn-o sm" onclick="toast('Saisissez le montant dans Prélèvements','i')">💸 Prélèvement</button>
       <button class="btn btn-o sm" onclick="razCaisse()">🔄 RAZ Caisse</button>
+      <button class="btn btn-b sm" onclick="print58()">🖨️ 58mm</button>
       <button class="btn btn-b sm" onclick="print80()">🖨️ 80mm</button>
       <button class="btn btn-o sm" onclick="printA4()">📄 A4</button>
-      <button class="btn btn-o sm" onclick="ouvrirHistoriqueClotures()">🗂️ Historique</button>
+      <button class="btn btn-o sm" onclick="archiverClotureManuel()">🗄️ Archiver</button>
+      <button class="btn btn-o sm" onclick="ouvrirHistoriqueClotures()">🗂️ Historique / Archives</button>
     </div>
     <div class="cgrid">
       <div class="ccard"><div class="ccti">☀️ Récapitulatif Journée</div>
@@ -1088,7 +1091,7 @@ ART-001,Regab,Bière,Bouteille,2500,1500,50,10,🍺"></textarea>
       <span style="font-size:24px;font-weight:900;color:#CC0000" id="bilanTotal">0 FCFA</span>
     </div>
   </div>
-  <div class="mf"><button class="btn btn-o" onclick="closeM('ovClotureBilan')">Fermer</button><button class="btn btn-r" onclick="print80()">🖨️ Imprimer 80mm</button><button class="btn btn-r" onclick="printA4()">📄 Imprimer A4</button></div>
+  <div class="mf"><button class="btn btn-o" onclick="closeM('ovClotureBilan')">Fermer</button><button class="btn btn-r" onclick="print58()">🖨️ Imprimer 58mm</button><button class="btn btn-r" onclick="print80()">🖨️ Imprimer 80mm</button><button class="btn btn-r" onclick="printA4()">📄 Imprimer A4</button></div>
 </div></div>
 
 <div class="ov" id="ovAirtel"><div class="md"><div class="mh"><span class="mt">📱 Paiement Airtel Money</span><button class="mc" onclick="fermerAirtelModal()">✕</button></div>
@@ -3513,6 +3516,7 @@ function txsCloture(){
 }
 function initCloture(){
   renderCloCaisseSelect();
+  var sf=g('cloFormat');if(sf)sf.value=formatCloture();
   var f=g('cloCaisse')?g('cloCaisse').value:'';
   var fonds=getFondsOuverture(f);
   var tl=txsCloture();
@@ -3539,8 +3543,10 @@ function addPrel(){
   prls.push({mnt:mnt,motif:motif,heure:heure});
   g('prelMnt').value='';g('prelMotif').value='';
   renderPrls();initCloture();
+  // Archive automatiquement la clôture en cours (avec ce prélèvement) dans Historique / Archives.
+  try{var snapPrel=construireInstantaneCloture();if(snapPrel.tl.length)archiverCloture(snapPrel,false);}catch(e){}
   if(window.fssSyncPush)window.fssSyncPush();
-  toast(fmt(mnt)+' prélevé','s');
+  toast(fmt(mnt)+' prélevé — archivé','s');
   imprimerPrelevement(mnt,motif,heure,solde-mnt);
 }
 // Petit ticket imprimé automatiquement à chaque prélèvement, pour garder une trace papier
@@ -3639,16 +3645,7 @@ function doCloture(){
   // rien de réel) — permet de retrouver et réimprimer n'importe quelle
   // clôture passée plus tard, par période.
   var snapshot=construireInstantaneCloture();
-  clotureHistorique.unshift({
-    id:'HCL-'+Date.now(),
-    date:new Date().toISOString(),
-    caisse:snapshot.cxLbl,
-    nbTickets:snapshot.tl.length,
-    ttc:snapshot.ttc,
-    prelevements:snapshot.tp,
-    solde:snapshot.ttc-snapshot.tp,
-    snapshot:snapshot
-  });
+  archiverCloture(snapshot,true);
   // Impression automatique du bilan de clôture complet (ticket 80mm) :
   // - Depuis le poste Serveur lui-même : impression directe.
   // - Depuis un téléphone ou un poste client : la demande est transmise au
@@ -3656,7 +3653,7 @@ function doCloture(){
   //   garantit qu'un ticket sort bien, même sans imprimante sur l'appareil
   //   utilisé pour clôturer.
   if(window.FSS_IS_SERVER){
-    print80();
+    imprimerClotureFormat(snapshot.fmt);
   }else{
     var lotCloture={batchId:'CLO-'+Date.now(),type:'cloture',snapshot:snapshot};
     printBatches.push(lotCloture);
@@ -3674,10 +3671,7 @@ function doCloture(){
 // HISTORIQUE DES CLÔTURES — sélection de période, réimpression
 // ============================================================
 function ouvrirHistoriqueClotures(){
-  var aujourdhui=todayStr();
-  if(!g('histClDebut').value)g('histClDebut').value=aujourdhui;
-  if(!g('histClFin').value)g('histClFin').value=aujourdhui;
-  renderHistoriqueClotures();
+  periodeHistCloture(30);
   g('ovHistCloture').classList.add('on');
 }
 function periodeHistCloture(joursAvant){
@@ -3703,18 +3697,19 @@ function renderHistoriqueClotures(){
     var dt=new Date(h.date);
     var tr=document.createElement('tr');
     tr.innerHTML='<td>'+dt.toLocaleDateString('fr-FR')+' '+dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})+'</td>'+
-      '<td>'+h.caisse+'</td><td>'+h.nbTickets+'</td>'+
+      '<td>'+h.caisse+(h.officielle===false?' <span style="font-size:10px;color:#FFAA00">(en cours)</span>':'')+'</td><td>'+h.nbTickets+'</td>'+
       '<td><strong>'+fmt(h.ttc)+'</strong></td>'+
       '<td style="color:#FF4444">'+fmt(h.prelevements)+'</td>'+
       '<td style="color:#4488FF"><strong>'+fmt(h.solde)+'</strong></td>'+
-      '<td><button class="btn btn-o sm" onclick="reimprimerCloture(\''+h.id+'\')">🖨️ Réimprimer</button></td>';
+      '<td><button class="btn btn-o sm" onclick="reimprimerCloture(\''+h.id+'\',\'58mm\')">🖨️ 58mm</button> <button class="btn btn-o sm" onclick="reimprimerCloture(\''+h.id+'\',\'80mm\')">🖨️ 80mm</button></td>';
     b.appendChild(tr);
   });
 }
-function reimprimerCloture(id){
+function reimprimerCloture(id,f){
   var h=clotureHistorique.find(function(x){return x.id===id;});
   if(!h){toast('Clôture introuvable','e');return;}
-  ouvrirEtImprimerHTML(buildBilanClotureHTML(h.snapshot));
+  f=(f==='58mm'||f==='80mm')?f:formatCloture();
+  ouvrirEtImprimerHTML(buildBilanClotureHTML(h.snapshot,f),f);
 }
 function afficherBilanCloture(){
   var b=g('bilanBody');if(!b)return;
@@ -3756,16 +3751,15 @@ function calcCpt(){var tot=(parseInt(g('b10').value)||0)*10000+(parseInt(g('b5')
 // Construit le HTML du bilan de clôture à partir d'un instantané de données
 // (pas d'accès au DOM ici) — réutilisé à la fois pour l'impression locale et
 // pour l'impression automatique routée vers le poste Serveur.
-function buildBilanClotureHTML(snapshot,fmt){
-  fmt=(fmt==='58mm')?'58mm':(fmt==='80mm'?'80mm':formatPapierTpe());
+function buildBilanClotureHTML(snapshot,papier){
+  // NB : le paramètre ne s'appelle volontairement PAS "fmt" — ce nom est celui de la fonction
+  // globale de formatage monétaire (voir plus haut) ; le masquer ici a déjà causé un
+  // "fmt is not a function" dans imprimerPrelevement.
+  papier=(papier==='58mm')?'58mm':(papier==='80mm'?'80mm':formatPapierTpe());
   var tl=snapshot.tl,cxLbl=snapshot.cxLbl,ttc=snapshot.ttc,tp=snapshot.tp,now=snapshot.now;
-
   var parArticle={};
   tl.forEach(function(t){
     (t.items||[]).forEach(function(it){
-      // Nom normalisé (espaces superflus retirés, casse ignorée) pour que
-      // deux ventes du même article ne finissent jamais sur deux lignes
-      // séparées à cause d'une différence d'espace ou de majuscule.
       var nomBrut=(it.nom||'').toString();
       var cle=nomBrut.trim().toLowerCase();
       if(!parArticle[cle])parArticle[cle]={nom:nomBrut.trim(),qty:0,total:0};
@@ -3777,37 +3771,29 @@ function buildBilanClotureHTML(snapshot,fmt){
     return {nom:parArticle[cle].nom,qty:parArticle[cle].qty,total:parArticle[cle].total};
   }).sort(function(a,b){return b.qty-a.qty;});
 
-  // Même police/graisse que les autres tickets de cette caisse (bon de commande, addition,
-  // reçu) : 11px, gras maximal (900).
-  //
-  // IMPORTANT — historique de ce ticket précis : deux versions précédentes de ce code (l'une en
-  // tableau à largeur "libre" par ligne, l'autre en tableau à largeur figée par ligne) ont
-  // toutes les deux fini par imprimer la colonne de droite (les montants) totalement VIDE sur
-  // cet appareil — alors que ce même motif "<table> à 2 colonnes" fonctionne sans souci sur le
-  // bon de commande, l'addition et le reçu. La seule vraie différence structurelle : ce ticket
-  // crée un <table> SÉPARÉ pour CHAQUE ligne (une par vente + une par article de la journée),
-  // soit potentiellement des dizaines de petits tableaux indépendants dans un seul document — bien
-  // plus que n'importe quel autre ticket de cette caisse. On regroupe donc toutes les lignes de
-  // chaque section dans UN SEUL tableau à plusieurs lignes (<tr>) au lieu d'un tableau par ligne,
-  // comme le fait déjà RAPPORT DE CLÔTURE A4 (printA4, jamais touché par ce problème) — en plus
-  // d'être la structure HTML standard pour une liste de ce type. Montants désormais confirmés
-  // OK sur H10S ET Sunmi avec cette structure — on remet donc l'effet de contour
-  // (-webkit-text-stroke), comme sur les autres tickets, pour un gras maximal identique partout
-  // (le H10S a un rouleau 58mm, physiquement plus étroit que le 80mm du Sunmi — la colonne de
-  // texte y est donc normalement plus étroite, mais la graisse du texte doit être la même).
-  var css='@page{size:'+fmt+' auto;margin:0}'+
+  // MISE EN PAGE SANS TABLEAU, sans colonne "nowrap" ni largeur imposée.
+  // Cause réelle des montants absents (constatée sur photo : "Toutes le", "16:54:", "(Bouteill"
+  // coupés à droite) : la zone d'impression d'un TPE est très étroite (~190 px CSS sur 58mm).
+  // Dès qu'UN élément a une largeur minimale plus grande que cette zone (colonne de montant
+  // "nowrap" + libellé), la WebView élargit TOUTE la page ; l'image envoyée à l'imprimante ne
+  // garde que la partie gauche, et la colonne de droite — celle des montants — est rognée.
+  // Ici chaque ligne est un bloc ordinaire : le montant est flottant à droite, le libellé passe
+  // simplement à la ligne s'il est trop long. Un bloc ne peut JAMAIS élargir la page, quelle
+  // que soit la largeur du papier (58mm ou 80mm).
+  var css='@page{size:'+papier+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
-    'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor}'+
-    'table{width:100%;border-collapse:collapse;margin:0}'+
-    'td{padding:1px 0;vertical-align:top}'+
-    'td.l{text-align:left;overflow-wrap:break-word;word-break:break-word}'+
-    'td.r{text-align:right;padding-left:10px;white-space:nowrap}'+
+    'html,body{width:100%;max-width:100%;overflow-x:hidden}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor;overflow-wrap:anywhere;word-break:break-word}'+
+    '.row{overflow:hidden;padding:1px 0}'+
+    '.row .v{float:right;margin-left:8px;white-space:nowrap}'+
     '.sep{border-top:1px dashed #000;margin:6px 0}'+
     '.c{text-align:center}.b{font-weight:900}'+
     '.stit{font-size:11px;font-weight:900;margin-top:5px}';
-  function ligneTr(label,val){
-    return '<tr><td class="l">'+label+'</td><td class="r">'+val+'</td></tr>';
+  // Espace insécable fin (U+202F) de toLocaleString -> espace simple : certaines polices
+  // embarquées n'ont pas ce glyphe et affichent un carré ou rien.
+  function nb(n){return Math.round(n||0).toLocaleString('fr-FR').replace(/[  ]/g,' ');}
+  function ligne(label,val,extraStyle){
+    return '<div class="row"'+(extraStyle?' style="'+extraStyle+'"':'')+'><span class="v">'+val+'</span>'+label+'</div>';
   }
 
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>';
@@ -3817,42 +3803,94 @@ function buildBilanClotureHTML(snapshot,fmt){
   if(snapshot.origine)html+='<div class="c" style="font-size:10px">Clôturé depuis : '+snapshot.origine+'</div>';
   html+='<div class="sep"></div>';
 
-  html+='<table>';
   tl.forEach(function(t){
-    html+=ligneTr(t.id+' — '+t.date,t.ttc.toLocaleString('fr-FR')+' F');
+    html+=ligne(t.id+' — '+t.date,nb(t.ttc)+' F');
   });
-  html+='</table>';
 
   html+='<div class="sep"></div>';
   html+='<div class="stit">DÉTAIL DES VENTES</div>';
   html+='<div class="sep"></div>';
   if(articlesTries.length){
-    html+='<table>';
     articlesTries.forEach(function(a){
-      html+=ligneTr(a.qty+'x '+a.nom,a.total.toLocaleString('fr-FR')+' F');
+      html+=ligne(a.qty+'x '+a.nom,nb(a.total)+' F');
     });
-    html+='</table>';
   }else{
     html+='<div class="c">Aucune vente</div>';
   }
 
   html+='<div class="sep"></div>';
-  html+='<table>';
-  html+=ligneTr('CA TTC','<span class="b">'+ttc.toLocaleString('fr-FR')+' F</span>');
-  if(tp)html+=ligneTr('Prélèvements','<span class="b" style="color:red">-'+tp.toLocaleString('fr-FR')+' F</span>');
-  html+='</table>';
-  html+='<table style="font-size:14px">'+ligneTr('<span class="b">SOLDE</span>','<span class="b">'+(ttc-tp).toLocaleString('fr-FR')+' F</span>')+'</table>';
+  // Montants de la clôture en BAS du ticket (demande explicite de l'utilisateur).
+  html+=ligne('CA TTC','<span class="b">'+nb(ttc)+' F</span>');
+  if(tp)html+=ligne('Prélèvements','<span class="b">-'+nb(tp)+' F</span>');
+  html+=ligne('<span class="b">SOLDE</span>','<span class="b">'+nb(ttc-tp)+' F</span>','font-size:14px;margin-top:2px');
   html+='<div class="sep"></div>';
   html+='<div class="c" style="font-size:11px">Merci</div>';
   html+='</body></html>';
   return html;
 }
 // Impression locale directe (utilisée par le bouton "80mm" manuel)
-function print80(){
-  var snapshot=construireInstantaneCloture();
-  var fmt=formatPapierTpe();
-  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot,fmt),fmt);
+function formatCloture(){
+  try{
+    var v=localStorage.getItem('fss-format-cloture');
+    if(v==='58mm'||v==='80mm')return v;
+  }catch(e){}
+  return formatPapierTpe();
 }
+function enregistrerFormatCloture(v){
+  try{localStorage.setItem('fss-format-cloture',(v==='80mm')?'80mm':'58mm');}catch(e){}
+}
+function imprimerClotureFormat(f){
+  var snapshot=construireInstantaneCloture();
+  if(snapshot.tl.length)archiverCloture(snapshot,false);
+  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot,f),f);
+}
+// Enregistre la clôture dans l'Historique (= les archives). Appelée par "Clôturer", par le
+// bouton "Archiver" et par chaque impression manuelle (58mm/80mm) : avant, seule la clôture
+// officielle archivait, donc une clôture imprimée avec les boutons 58mm/80mm n'apparaissait
+// jamais dans l'historique ("archive vide"). Une clôture identique déjà archivée le même jour
+// (même caisse, mêmes montants) n'est pas dupliquée, sauf si force=true (clôture officielle).
+function archiverCloture(snapshot,officielle){
+  // Une seule ligne "en cours" par jour et par caisse : chaque prélèvement / impression manuelle
+  // la met à jour au lieu d'en créer une nouvelle. "Clôturer" la valide (officielle=true) ;
+  // un prélèvement fait après une clôture officielle démarre une nouvelle ligne "en cours".
+  var jour=new Date().toISOString().slice(0,10);
+  var champs={
+    caisse:snapshot.cxLbl,
+    nbTickets:snapshot.tl.length,
+    ttc:snapshot.ttc,
+    prelevements:snapshot.tp,
+    solde:snapshot.ttc-snapshot.tp,
+    snapshot:snapshot,
+    officielle:!!officielle
+  };
+  var ex=clotureHistorique.find(function(h){
+    return h.officielle===false&&h.date.slice(0,10)===jour&&h.caisse===snapshot.cxLbl;
+  });
+  var entree;
+  if(ex){
+    if(!officielle&&ex.ttc===champs.ttc&&ex.prelevements===champs.prelevements&&ex.nbTickets===champs.nbTickets)return false;
+    for(var k in champs)ex[k]=champs[k];
+    ex.date=new Date().toISOString();
+    entree=ex;
+  }else{
+    entree={id:'HCL-'+Date.now(),date:new Date().toISOString()};
+    for(var k2 in champs)entree[k2]=champs[k2];
+    clotureHistorique.unshift(entree);
+  }
+  window.clotureHistorique=clotureHistorique;
+  // Route dédiée (immédiate) : ne dépend plus de la synchronisation générale, qui pouvait
+  // effacer cette entrée avant son envoi. Repli sur l'ancienne synchro si indisponible.
+  if(window.fssEnvoyerClotureArchive)window.fssEnvoyerClotureArchive(entree);
+  else if(window.fssSyncPush)window.fssSyncPush();
+  return true;
+}
+function archiverClotureManuel(){
+  var snapshot=construireInstantaneCloture();
+  if(!snapshot.tl.length){toast('Aucune vente à archiver pour cette caisse','e');return;}
+  toast(archiverCloture(snapshot,false)?'🗄️ Clôture archivée — visible dans Historique':'Cette clôture est déjà archivée','s');
+}
+function print58(){imprimerClotureFormat('58mm');}
+function print80(){imprimerClotureFormat('80mm');}
 function construireInstantaneCloture(){
   var tl=txsCloture();
   return {
@@ -3861,6 +3899,7 @@ function construireInstantaneCloture(){
     ttc:tl.reduce(function(s,t){return s+t.ttc;},0),
     tp:prls.reduce(function(s,p){return s+p.mnt;},0),
     now:new Date().toLocaleString('fr-FR'),
+    fmt:formatCloture(),
     origine:(window.currentUser&&window.currentUser.nom?window.currentUser.nom+' — ':'')+(window.FSS_IS_SERVER?'Poste Serveur':'Poste distant (client/mobile)')
   };
 }
@@ -3931,8 +3970,8 @@ function ouvrirEtImprimerHTML(html,fmt,tentative){
 // qui a validé la clôture. Le format utilisé est celui réglé sur CE poste serveur
 // (formatPapierTpe), pas celui de l'appareil qui a déclenché la clôture à distance.
 function imprimerBilanClotureAuto(snapshot){
-  var fmt=formatPapierTpe();
-  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot,fmt),fmt);
+  var f=(snapshot&&(snapshot.fmt==='58mm'||snapshot.fmt==='80mm'))?snapshot.fmt:formatPapierTpe();
+  ouvrirEtImprimerHTML(buildBilanClotureHTML(snapshot,f),f);
 }
 function printA4(){var tl=txsCloture(),cxLbl=(g('cloCaisse')&&g('cloCaisse').value)||'Toutes les caisses',ttc=tl.reduce(function(s,t){return s+t.ttc;},0),tp=prls.reduce(function(s,p){return s+p.mnt;},0),w=window.open('','_blank'),now=new Date().toLocaleString('fr-FR');w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:11px;padding:20mm}h1{font-size:22px;color:#CC0000}h2{font-size:14px;margin:14px 0 6px}table{width:100%;border-collapse:collapse;margin-bottom:12px}th{background:#CC0000;color:#fff;padding:7px 10px;text-align:left}td{padding:6px 10px;border-bottom:1px solid #eee}tr:nth-child(even) td{background:#f9f9f9}.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}.kc{border:1px solid #ddd;border-radius:6px;padding:10px 14px}.kl{font-size:10px;color:#666;text-transform:uppercase}.kv{font-size:20px;font-weight:700;color:#CC0000}.sep{border-top:2px solid #CC0000;margin:14px 0}.footer{text-align:center;font-size:10px;color:#666;margin-top:20px}</style></head><body>');w.document.write('<h1>FSS-CAISSE</h1><div style="font-size:12px;color:#666">RAPPORT DE CLÔTURE — '+cxLbl+' — '+now+'</div><div class="sep"></div><div class="kpi"><div class="kc"><div class="kl">Tickets</div><div class="kv" style="color:#1144CC">'+tl.length+'</div></div><div class="kc"><div class="kl">Total</div><div class="kv">'+ttc.toLocaleString('fr-FR')+' F</div></div><div class="kc"><div class="kl">Solde</div><div class="kv" style="color:#1144CC">'+(ttc-tp).toLocaleString('fr-FR')+' F</div></div></div><h2>Transactions</h2><table><thead><tr><th>N° Ticket</th><th>Date</th><th>Table</th><th>Caisse</th><th>Montant</th><th>Paiement</th></tr></thead><tbody>');tl.forEach(function(t){w.document.write('<tr><td>'+t.id+'</td><td>'+t.date+'</td><td>'+t.tbl+'</td><td>'+(t.caisse||'—')+'</td><td><strong>'+t.ttc.toLocaleString('fr-FR')+'</strong></td><td>'+t.pay+'</td></tr>');});w.document.write('</tbody></table><div class="footer">FSS-CAISSE — '+now+'</div></body></html>');w.document.close();w.onafterprint=function(){w.close();};setTimeout(function(){w.print();},400);setTimeout(function(){if(!w.closed)w.close();},15000);}
 

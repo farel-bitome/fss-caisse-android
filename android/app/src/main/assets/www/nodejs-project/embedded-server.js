@@ -240,6 +240,31 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
         res.status(500).json({ ok: false, error: e.message });
       }
     });
+    // Archives des clôtures : même principe que printBatches. Une clôture est ajoutée via cette
+    // route dédiée, immédiate ; /api/state (ci-dessous) ne touche plus jamais à l'historique.
+    // Sinon un "écho" de synchronisation d'une action précédente remplaçait la liste locale par
+    // celle du serveur avant l'envoi de la nouvelle clôture, qui disparaissait des archives.
+    expressApp.post('/api/cloture/archiver', (req, res) => {
+      try {
+        const entree = req.body;
+        if (!entree || !entree.id) { res.status(400).json({ ok: false, error: 'clôture invalide' }); return; }
+        state.clotureHistorique = state.clotureHistorique || [];
+        const pos = state.clotureHistorique.findIndex(function (h) { return h.id === entree.id; });
+        if (pos >= 0) {
+          state.clotureHistorique[pos] = entree; // mise à jour d'une clôture "en cours"
+        } else {
+          state.clotureHistorique.unshift(entree);
+          if (state.clotureHistorique.length > 3000) state.clotureHistorique = state.clotureHistorique.slice(0, 3000);
+        }
+        saveState(state);
+        io.emit('state:changed', state);
+        ecrireJournal('Clôture archivée : ' + entree.id + ' — total archives : ' + state.clotureHistorique.length);
+        res.json({ ok: true });
+      } catch (e) {
+        console.error('[FSS-CAISSE] Erreur archivage clôture :', e);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
     expressApp.post('/api/cmdattente/retirer', (req, res) => {
       try {
         state.cmdAttente = (state.cmdAttente || []).filter(function (c) { return c.id !== req.body.id; });
@@ -286,6 +311,9 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
         // pour ne plus jamais pouvoir écraser un lot qui vient d'être ajouté par cette route
         // dédiée juste avant.
         nouvelEtat.printBatches = state.printBatches || [];
+        // Idem pour les archives de clôtures (route /api/cloture/archiver) : le serveur reste la
+        // seule source de vérité de l'historique.
+        nouvelEtat.clotureHistorique = state.clotureHistorique || [];
         if (state && Array.isArray(state.tables) && Array.isArray(nouvelEtat.tables)) {
           nouvelEtat.tables = fusionnerTables(state.tables, nouvelEtat.tables);
         }

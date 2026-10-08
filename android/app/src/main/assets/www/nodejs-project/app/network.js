@@ -343,6 +343,17 @@
     });
   }
 
+  // Archive UNE clôture via la route dédiée (voir /api/cloture/archiver dans embedded-server.js).
+  function envoyerClotureArchive(entree) {
+    return fetch('/api/cloture/archiver', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entree)
+    }).catch(function () {
+      safe(function () { toast('⚠️ Archive de la clôture non transmise au serveur — vérifiez la connexion', 'e'); });
+    });
+  }
+  window.fssEnvoyerClotureArchive = envoyerClotureArchive;
   window.fssSyncPush = syncPush;
   window.fssSyncPushImmediate = syncPushImmediate;
   window.fssEnvoyerCmdAttente = envoyerCmdAttente;
