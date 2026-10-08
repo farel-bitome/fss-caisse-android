@@ -1858,6 +1858,11 @@ function imprimerAddition(attId,nbParts,format){
   if(window.isWaiterOnly&&window.isWaiterOnly()){toast("Ce compte ne peut pas sortir l'addition","e");return;}
   var c=cmdAttente.find(function(x){return x.id===attId;});
   if(!c){toast('Commande introuvable','e');return;}
+  var manqueAdd=[];
+  if(!c.tableNom||c.tableNom==='—')manqueAdd.push('la table');
+  if(!c.srv||c.srv==='—')manqueAdd.push('le serveur');
+  if(('caisse' in c)&&!c.caisse)manqueAdd.push('la caisse');
+  if(manqueAdd.length){toast('❌ Addition impossible : '+manqueAdd.join(', ')+' non renseigné(e) sur cette commande — reprenez-la et complétez','e');return;}
   var etab=g('etabNom')?g('etabNom').value:'FSS-CAISSE';
   var ttc=c.total;
   // Sur TPE Android (pont natif présent), on imprime directement via le VRAI pilote
@@ -2010,8 +2015,29 @@ function imprimerTicketCommande(tx){
   html+='</body></html>';
   imprimerSilencieux(html);
 }
+// Table, serveur ET caisse sont OBLIGATOIRES avant d'envoyer un bon de commande ("En attente"),
+// de sortir l'addition ou d'encaisser. Surligne en rouge ce qui manque et renvoie false.
+function verifierSelectionsObligatoires(action){
+  var champs=[
+    {id:'selTable',nom:'la table',vide:function(v){return !v||v==='0';}},
+    {id:'selSrv',nom:'le serveur',vide:function(v){return !v;}},
+    {id:'selCaisse',nom:'la caisse',vide:function(v){return !v;}}
+  ];
+  var manquants=[];
+  champs.forEach(function(c){
+    var el=g(c.id);if(!el)return;
+    var manque=c.vide(el.value);
+    el.style.outline=manque?'2px solid #FF3333':'';
+    if(manque)manquants.push(c);
+  });
+  if(!manquants.length)return true;
+  toast('❌ Sélectionnez '+manquants.map(function(c){return c.nom;}).join(', ')+' avant '+(action||'de continuer'),'e');
+  try{g(manquants[0].id).focus();}catch(e){}
+  return false;
+}
 function mettreEnAttente(){
   if(!tkt.length){toast('Ticket vide','e');return;}
+  if(!verifierSelectionsObligatoires("d'envoyer le bon de commande"))return;
   var tableNom=tableNomAffiche();
   var tableVal=tableValCombine();
   var srv=g('selSrv').value||'—';
@@ -2031,7 +2057,8 @@ function mettreEnAttente(){
     id='ATT-'+attenteSeq++;
     deltaItems=tkt.map(function(i){return{nom:i.nom,qty:i.qty||i.qt||1};});
   }
-  var nouvelleCommandeAttente={id:id,tableNom:tableNom,tableVal:tableVal,srv:srv,items:JSON.parse(JSON.stringify(tkt)),sentQty:qtyMapNow,total:total,heure:heure,ts:Date.now()};
+  var nouvelleCommandeAttente={id:id,tableNom:tableNom,tableVal:tableVal,srv:srv,caisse:(g('selCaisse')?g('selCaisse').value:''),items:JSON.parse(JSON.stringify(tkt)),sentQty:qtyMapNow,total:total,heure:heure,ts:Date.now()};
+  cmdAttente=cmdAttente.filter(function(c){return c.id!==id;});
   cmdAttente.push(nouvelleCommandeAttente);
   // Le bon de commande cuisine s'imprime bien à l'envoi (comme d'habitude).
   // Il ne s'imprime PAS au moment du paiement — ces deux impressions sont
@@ -2087,16 +2114,22 @@ function reprendreAttente(id){
     resumingSentQty={};
     c.items.forEach(function(it){resumingSentQty[it.id]=(resumingSentQty[it.id]||0)+(it.qty||it.qt||1);});
   }
-  cmdAttente.splice(idx,1);
-  if(window.fssRetirerCmdAttente)window.fssRetirerCmdAttente(id);
+  // La commande n'est PLUS retirée de "En attente" pendant qu'on la modifie : elle ne disparaît
+  // (et sa table ne redevient libre) que lorsqu'elle est PAYÉE ou ANNULÉE (✕). Avant, une
+  // fermeture de l'appli, une coupure ou un clic sur "Annuler" avec un ticket vide faisait
+  // disparaître la commande ET sa table alors que rien n'était payé.
   // c.tableVal peut être "5" (table seule) ou "5-B" (table + sous-facture) :
   // on décompose pour sélectionner correctement les deux champs. On retire
   // d'abord la commande de la liste (ligne au-dessus) pour que sa propre
   // sous-facture n'apparaisse pas comme "déjà occupée" lors de la reprise.
   var parts=String(c.tableVal).split('-');
   var sel=g('selTable');sel.value=parts[0];onTableChange();
+  if(parts[1]){var selSf=g('selSousFacture');if(selSf)selSf.value=parts[1];}
   var selS=g('selSrv');
   for(var j=0;j<selS.options.length;j++){if(selS.options[j].text===c.srv){selS.value=selS.options[j].value;break;}}
+  // Restaure aussi la caisse mémorisée avec la commande (sauf compte dont la caisse est imposée).
+  var selCx=g('selCaisse');
+  if(c.caisse&&selCx&&!selCx.disabled)selCx.value=c.caisse;
   renderTkt();updTotal();renderAttenteBar();updateTableOptions();
   toast('Commande '+c.id+' reprise ▶ — ajoutez vos articles puis "Envoyer" ou payez directement','s');
 }
@@ -2104,6 +2137,11 @@ function supprimerAttente(id){
   if(window.hasSuppressionAttentePermission&&!window.hasSuppressionAttentePermission()){toast('Vous n\'avez pas le droit de supprimer une commande en attente','e');return;}
   if(!confirm('Supprimer ?'))return;
   cmdAttente=cmdAttente.filter(function(c){return c.id!==id;});
+  if(resumingAttenteId===id){
+    // On annule explicitement la commande qu'on était en train de modifier : on vide aussi le ticket.
+    resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;
+    tkt=[];renderTkt();updTotal();libererTable();
+  }
   renderAttenteBar();updateTableOptions();toast('Supprimé','i');
   if(window.fssRetirerCmdAttente)window.fssRetirerCmdAttente(id);
 }
@@ -2130,6 +2168,10 @@ function renderAttenteBar(){
       '<span style="color:#FF6666">'+(c.srv&&c.srv!=='—'?c.srv:c.tableNom)+'</span> '+
       '<span style="color:#888">'+c.heure+'</span> '+
       '<span style="color:#fff;font-weight:700">'+Math.round(c.total).toLocaleString('fr-FR')+' F</span> ';
+    if(c.id===resumingAttenteId){
+      div.style.borderColor='#44FF88';
+      info.innerHTML='<span style="color:#44FF88;font-weight:700">✏️ en modification</span> '+info.innerHTML;
+    }
     div.appendChild(info);div.appendChild(btnA);div.appendChild(btnR);
     if(canDel){
       var btnS=document.createElement('button');
@@ -2257,23 +2299,31 @@ function clearTk(silent){
   // caisse/cuisine), "Annuler" ne doit jamais la faire disparaître purement
   // et simplement — elle est remise dans "Commandes en attente" telle
   // qu'elle était, comme si on n'avait jamais cliqué sur "Reprendre".
-  if(resumingAttenteId&&tkt.length){
-    var sel=g('selTable');
-    var commandeRemise={
-      id:resumingAttenteId,
-      tableNom:tableNomAffiche?tableNomAffiche():(sel?sel.options[sel.selectedIndex].text:'—'),
-      tableVal:tableValCombine?tableValCombine():(sel?sel.value:'0'),
-      srv:g('selSrv')?g('selSrv').value:'—',
-      items:JSON.parse(JSON.stringify(tkt)),
-      sentQty:(function(){var m={};tkt.forEach(function(it){m[it.id]=(m[it.id]||0)+(it.qty||it.qt||1);});return m;})(),
-      total:tkt.reduce(function(s,i){return s+i.pv*(i.qty||i.qt||1);},0),
-      heure:new Date().toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'}),
-      ts:Date.now()
-    };
-    cmdAttente.push(commandeRemise);
-    if(window.fssEnvoyerCmdAttente)window.fssDerniereEnvoyerCmdAttentePromise=window.fssEnvoyerCmdAttente(commandeRemise);
-    if(!silent)toast('Commande remise en attente (rien n\'a été supprimé)','i');
-    renderAttenteBar();
+  if(resumingAttenteId){
+    // La commande reprise est restée dans "En attente" pendant toute la modification (voir
+    // reprendreAttente) : annuler les modifications la laisse telle qu'elle était à son dernier
+    // envoi — rien à reconstruire. Seul cas de repli : elle a disparu entre-temps (supprimée
+    // depuis un autre poste, ancien état) — on la remet alors à partir de son contenu d'origine.
+    var idRepris=resumingAttenteId;
+    if(!cmdAttente.some(function(c){return c.id===idRepris;})&&resumingBaseItems&&resumingBaseItems.length){
+      var selR=g('selTable');
+      var commandeRemise={
+        id:idRepris,
+        tableNom:tableNomAffiche?tableNomAffiche():(selR?selR.options[selR.selectedIndex].text:'—'),
+        tableVal:tableValCombine?tableValCombine():(selR?selR.value:'0'),
+        srv:g('selSrv')?g('selSrv').value:'—',
+        caisse:g('selCaisse')?g('selCaisse').value:'',
+        items:JSON.parse(JSON.stringify(resumingBaseItems)),
+        sentQty:JSON.parse(JSON.stringify(resumingSentQty||{})),
+        total:resumingBaseItems.reduce(function(s,i){return s+i.pv*(i.qty||i.qt||1);},0),
+        heure:new Date().toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'}),
+        ts:Date.now()
+      };
+      cmdAttente.push(commandeRemise);
+      if(window.fssEnvoyerCmdAttente)window.fssDerniereEnvoyerCmdAttentePromise=window.fssEnvoyerCmdAttente(commandeRemise);
+    }
+    if(!silent)toast('Modifications annulées — la commande reste en attente (rien n\'a été supprimé)','i');
+    renderAttenteBar();updateTableOptions();
   }else if(!silent){
     toast('Ticket annulé','i');
   }
@@ -2312,7 +2362,7 @@ function renderSousFactureSelect(){
   sel.innerHTML='<option value="">Sous-facture —</option>';
   if(!tv||tv==='0'){sel.disabled=true;return;}
   sel.disabled=false;
-  var occupees=cmdAttente.filter(function(c){return String(c.tableVal).indexOf(tv+'-')===0;}).map(function(c){return String(c.tableVal).split('-')[1];});
+  var occupees=cmdAttente.filter(function(c){return c.id!==resumingAttenteId&&String(c.tableVal).indexOf(tv+'-')===0;}).map(function(c){return String(c.tableVal).split('-')[1];});
   LETTRES_SOUS_FACTURE.forEach(function(l){
     var opt=document.createElement('option');
     opt.value=l;opt.text=occupees.indexOf(l)>=0?(l+' 🔴 (occupée)'):l;
@@ -2401,12 +2451,7 @@ function majApercuDivision(){
 function openPay(mode){
   if(window.isWaiterOnly&&window.isWaiterOnly()){toast('Ce compte ne peut pas encaisser — utilisez "En attente"','e');return;}
   if(!tkt.length){toast('Aucun article','e');return;}
-  var tblVal=g('selTable')?g('selTable').value:'';
-  if(!tblVal||tblVal==='0'){toast('Veuillez sélectionner une table avant de facturer','e');return;}
-  var srvVal=g('selSrv')?g('selSrv').value:'';
-  if(!srvVal){toast('Veuillez sélectionner un serveur avant de facturer','e');return;}
-  var cxVal=g('selCaisse')?g('selCaisse').value:'';
-  if(!cxVal){toast('Veuillez sélectionner une caisse avant de facturer','e');return;}
+  if(!verifierSelectionsObligatoires('de facturer'))return;
   if(mode==='airtel'){ouvrirAirtelModal();return;}
   payMode=mode;recAmt=0;
   if(g('nbTicketsVal'))g('nbTicketsVal').textContent=nbTickets;
@@ -2452,6 +2497,14 @@ function valPay(){
   var caisseNom=g('selCaisse')?g('selCaisse').value:'';
   txs.unshift({id:'TK-'+('000'+nextTk).slice(-4),date:dd+'/'+mm+' '+hh+':'+mi,tbl:tableNomAffiche(),srv:g('selSrv').value,caissier:caissier,caisse:caisseNom,arts:nb,items:itemsSnapshot,ttc:tot,pay:payMode==='esp'?'Espèces':(payMode==='airtel'?'Airtel Money':'Carte'),recu:recu,rendu:rendu,stat:'Validé'});
   nextTk++;g('tkNum').textContent='TK-#'+('000'+nextTk).slice(-4);
+  // Commande reprise depuis "En attente" : elle est maintenant PAYÉE, c'est le seul moment (avec
+  // l'annulation ✕) où elle sort de la liste et où sa table redevient libre.
+  if(resumingAttenteId){
+    var idPayee=resumingAttenteId;
+    cmdAttente=cmdAttente.filter(function(c){return c.id!==idPayee;});
+    if(window.fssRetirerCmdAttente)window.fssRetirerCmdAttente(idPayee);
+    renderAttenteBar();updateTableOptions();
+  }
   resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;
   closeM('ovPay');clearTk(true);libererTable();renderProds('');renderStk();renderTkList();renderRap();initCloture();
   afficherRecu(txs[0]);
@@ -3578,17 +3631,22 @@ function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
   var articlesTries=Object.keys(parArticle).map(function(cle){
     return {nom:parArticle[cle].nom,qty:parArticle[cle].qty,total:parArticle[cle].total};
   }).sort(function(a,b){return b.qty-a.qty;});
+  // MISE EN PAGE SANS TABLEAU (voir buildBilanClotureHTML pour l'explication complète) : la zone
+  // d'impression d'un TPE est très étroite ; une colonne de valeurs "nowrap" dans un tableau
+  // élargissait toute la page, et la partie droite — les VALEURS (caisse, heure, caissier,
+  // motif, montant, solde) — était rognée à l'impression. Ici chaque ligne est un bloc ordinaire :
+  // valeur flottante à droite, libellé qui passe à la ligne si besoin.
   var css='@page{size:'+papierFmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
-    'html,body{width:100%}'+
-    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor}'+
-    'table{width:100%;border-collapse:collapse;margin:1px 0;table-layout:fixed}'+
-    'td{padding:1px 0;overflow-wrap:break-word;word-break:break-word}'+
-    'td.r{text-align:right;white-space:nowrap}'+
+    'html,body{width:100%;max-width:100%;overflow-x:hidden}'+
+    'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor;overflow-wrap:anywhere;word-break:break-word}'+
+    '.row{overflow:hidden;padding:1px 0}'+
+    '.row .v{float:right;margin-left:8px;white-space:nowrap}'+
     '.sep{border-top:1px dashed #000;margin:5px 0}'+
     '.c{text-align:center}'+
     '.stit{font-size:11px;font-weight:900;margin-top:5px}';
-  function ligne(l,v){return '<table><tr><td style="overflow-wrap:break-word;word-break:break-word">'+l+'</td><td class="r" style="white-space:nowrap">'+v+'</td></tr></table>';}
+  function sp(t){return String(t).replace(/[\u202f\u00a0]/g,' ');}
+  function ligne(l,v){return '<div class="row"><span class="v">'+sp(v)+'</span>'+l+'</div>';}
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>';
   html+='<div class="c" style="font-size:13px">'+etab+'</div>';
   html+='<div class="c" style="font-size:11px;margin:3px 0">💸 PRÉLÈVEMENT</div>';
