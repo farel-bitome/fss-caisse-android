@@ -787,6 +787,10 @@ td{padding:8px 11px;vertical-align:middle}
             <span id="devPrintStatus" style="font-size:12px;color:#888;align-self:center"></span>
           </div>
         </div>
+        <div class="ssect"><div class="ssti">🔀 Rôle de cet appareil</div>
+          <div style="font-size:12px;color:#888;margin-bottom:14px">Ce TPE est actuellement configuré comme <strong>Poste Serveur</strong> (celui qui centralise les données) ou <strong>Poste Client</strong> (connecté à un serveur du réseau). Changer de rôle ramène à l'écran de configuration initial — les ventes, le stock et les réglages déjà enregistrés sur cet appareil ne sont pas effacés.</div>
+          <button class="btn btn-o" onclick="changerRoleAppareil()">🔀 Changer de rôle (Serveur / Poste client)</button>
+        </div>
         <div class="ssect"><div class="ssti">🧾 Journal technique impression</div>
           <div style="font-size:12px;color:#888;margin-bottom:10px">Historique détaillé de l'impression automatique des bons de commande (utile pour diagnostiquer un problème d'impression avec le support) — reste sur cet appareil, personne d'autre ne peut le voir.</div>
           <textarea id="devPrintLog" readonly style="width:100%;height:180px;font:11px monospace;background:#111;color:#ddd;border:1px solid #333;border-radius:6px;padding:8px;white-space:pre;resize:vertical"></textarea>
@@ -1444,6 +1448,12 @@ function demanderPermissionAffichage(){
     // Rafraîchit l'état affiché quand l'utilisateur revient sur cet écran après avoir accordé
     // (ou refusé) la permission dans les réglages système.
     setTimeout(rafraichirInfoImprimanteTpe,1500);
+  });
+}
+function changerRoleAppareil(){
+  if(!(window.electronAPI&&window.electronAPI.resetRole)){toast('Fonction indisponible','e');return;}
+  openAdminPwdConfirm('Cet appareil va revenir à l\'écran de configuration (choix Serveur / Poste client).<br><br>Les ventes, le stock et les réglages déjà enregistrés sur CET appareil restent intacts — seul le rôle réseau est réinitialisé.<br><br>Pour confirmer, saisissez votre mot de passe administrateur :','🔀 Changer de rôle',function(){
+    window.electronAPI.resetRole();
   });
 }
 function demanderIgnorerOptimisationBatterie(){
@@ -3537,7 +3547,11 @@ function addPrel(){
 // immédiate (montant, motif, heure, caissier, nouveau solde). Format papier : celui réglé une
 // fois pour toutes sur CE TPE (voir formatPapierTpe), pas de choix à chaque prélèvement.
 function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
-  var fmt=formatPapierTpe();
+  // IMPORTANT : ne PAS appeler cette variable "fmt" — il existe une fonction globale fmt(n) pour
+  // formater les montants (utilisée juste en dessous), et une variable locale "var fmt=..." la
+  // masquerait pour TOUTE cette fonction (déclaration hoistée), faisant planter fmt(mnt) avec
+  // "Uncaught TypeError: fmt is not a function" — c'est exactement ce qui se produisait ici.
+  var papierFmt=formatPapierTpe();
   var etab=g('etabNom')?g('etabNom').value:'FSS-CAISSE';
   var caissier=(window.currentUser&&window.currentUser.nom)?window.currentUser.nom:'—';
   var cxLbl=(g('cloCaisse')&&g('cloCaisse').value)||'Toutes les caisses';
@@ -3558,7 +3572,7 @@ function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
   var articlesTries=Object.keys(parArticle).map(function(cle){
     return {nom:parArticle[cle].nom,qty:parArticle[cle].qty,total:parArticle[cle].total};
   }).sort(function(a,b){return b.qty-a.qty;});
-  var css='@page{size:'+fmt+' auto;margin:0}'+
+  var css='@page{size:'+papierFmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
     'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor}'+
@@ -3601,7 +3615,7 @@ function imprimerPrelevement(mnt,motif,heure,nouveauSolde){
   // impression sur un TPE Android — c'est resté silencieusement cassé jusqu'ici — donc on ne
   // garde le popup qu'en secours pour la version bureau sans pont natif.
   if(window.electronAPI&&window.electronAPI.printSilent){
-    Promise.resolve(imprimerSilencieux(html,fmt)).then(function(r){
+    Promise.resolve(imprimerSilencieux(html,papierFmt)).then(function(r){
       if(r&&r.success===false){
         toast('❌ Échec impression ticket de prélèvement : '+(r.error||'erreur inconnue'),'e');
       }
@@ -3764,28 +3778,36 @@ function buildBilanClotureHTML(snapshot,fmt){
   }).sort(function(a,b){return b.qty-a.qty;});
 
   // Même police/graisse que les autres tickets de cette caisse (bon de commande, addition,
-  // reçu) : 11px, gras maximal (900). En revanche, CONTRAIREMENT aux autres tickets (qui ont peu
-  // de lignes), le bilan de clôture peut contenir des dizaines de lignes (une par transaction +
-  // une par article vendu dans la journée) — avec un tableau à largeur "libre" (auto), le moteur
-  // de rendu de ce TPE bas de gamme n'a pas toujours le temps de calculer correctement la largeur
-  // de CHAQUE petit tableau avant la capture, ce qui a déjà fait disparaître des montants entiers
-  // à l'impression (colonne de droite vide). On fige donc les largeurs de colonnes
-  // (table-layout:fixed + largeurs en %), comme le faisait la version précédente de ce ticket —
-  // seule approche qui se soit montrée fiable pour ce ticket précis sur cet appareil — tout en
-  // gardant la police/graisse demandée, identique aux autres tickets.
+  // reçu) : 11px, gras maximal (900).
+  //
+  // IMPORTANT — historique de ce ticket précis : deux versions précédentes de ce code (l'une en
+  // tableau à largeur "libre" par ligne, l'autre en tableau à largeur figée par ligne) ont
+  // toutes les deux fini par imprimer la colonne de droite (les montants) totalement VIDE sur
+  // cet appareil — alors que ce même motif "<table> à 2 colonnes" fonctionne sans souci sur le
+  // bon de commande, l'addition et le reçu. La seule vraie différence structurelle : ce ticket
+  // crée un <table> SÉPARÉ pour CHAQUE ligne (une par vente + une par article de la journée),
+  // soit potentiellement des dizaines de petits tableaux indépendants dans un seul document — bien
+  // plus que n'importe quel autre ticket de cette caisse. On regroupe donc toutes les lignes de
+  // chaque section dans UN SEUL tableau à plusieurs lignes (<tr>) au lieu d'un tableau par ligne,
+  // comme le fait déjà RAPPORT DE CLÔTURE A4 (printA4, jamais touché par ce problème) — en plus
+  // d'être la structure HTML standard pour une liste de ce type. Montants désormais confirmés
+  // OK sur H10S ET Sunmi avec cette structure — on remet donc l'effet de contour
+  // (-webkit-text-stroke), comme sur les autres tickets, pour un gras maximal identique partout
+  // (le H10S a un rouleau 58mm, physiquement plus étroit que le 80mm du Sunmi — la colonne de
+  // texte y est donc normalement plus étroite, mais la graisse du texte doit être la même).
   var css='@page{size:'+fmt+' auto;margin:0}'+
     '*{margin:0;padding:0;box-sizing:border-box}'+
     'html,body{width:100%}'+
     'body{font-family:"Courier New",monospace;font-size:11px;font-weight:900;padding:2mm 3mm;-webkit-text-stroke:0.35px currentColor}'+
-    'table{width:100%;border-collapse:collapse;table-layout:fixed}'+
-    'td{padding:1px 0;vertical-align:top;font-size:11px;font-weight:900}'+
-    'td.l{text-align:left;width:58%;overflow-wrap:break-word;word-break:break-word}'+
-    'td.r{text-align:right;width:42%;white-space:nowrap}'+
+    'table{width:100%;border-collapse:collapse;margin:0}'+
+    'td{padding:1px 0;vertical-align:top}'+
+    'td.l{text-align:left;overflow-wrap:break-word;word-break:break-word}'+
+    'td.r{text-align:right;padding-left:10px;white-space:nowrap}'+
     '.sep{border-top:1px dashed #000;margin:6px 0}'+
     '.c{text-align:center}.b{font-weight:900}'+
     '.stit{font-size:11px;font-weight:900;margin-top:5px}';
-  function ligne(label,val){
-    return '<table><tr><td class="l">'+label+'</td><td class="r">'+val+'</td></tr></table>';
+  function ligneTr(label,val){
+    return '<tr><td class="l">'+label+'</td><td class="r">'+val+'</td></tr>';
   }
 
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>';
@@ -3795,25 +3817,31 @@ function buildBilanClotureHTML(snapshot,fmt){
   if(snapshot.origine)html+='<div class="c" style="font-size:10px">Clôturé depuis : '+snapshot.origine+'</div>';
   html+='<div class="sep"></div>';
 
+  html+='<table>';
   tl.forEach(function(t){
-    html+=ligne(t.id+' — '+t.date,t.ttc.toLocaleString('fr-FR')+' F');
+    html+=ligneTr(t.id+' — '+t.date,t.ttc.toLocaleString('fr-FR')+' F');
   });
+  html+='</table>';
 
   html+='<div class="sep"></div>';
   html+='<div class="stit">DÉTAIL DES VENTES</div>';
   html+='<div class="sep"></div>';
   if(articlesTries.length){
+    html+='<table>';
     articlesTries.forEach(function(a){
-      html+=ligne(a.qty+'x '+a.nom,a.total.toLocaleString('fr-FR')+' F');
+      html+=ligneTr(a.qty+'x '+a.nom,a.total.toLocaleString('fr-FR')+' F');
     });
+    html+='</table>';
   }else{
     html+='<div class="c">Aucune vente</div>';
   }
 
   html+='<div class="sep"></div>';
-  html+=ligne('CA TTC','<span class="b">'+ttc.toLocaleString('fr-FR')+' F</span>');
-  if(tp)html+=ligne('Prélèvements','<span class="b" style="color:red">-'+tp.toLocaleString('fr-FR')+' F</span>');
-  html+='<div style="font-size:14px">'+ligne('<span class="b">SOLDE</span>','<span class="b">'+(ttc-tp).toLocaleString('fr-FR')+' F</span>')+'</div>';
+  html+='<table>';
+  html+=ligneTr('CA TTC','<span class="b">'+ttc.toLocaleString('fr-FR')+' F</span>');
+  if(tp)html+=ligneTr('Prélèvements','<span class="b" style="color:red">-'+tp.toLocaleString('fr-FR')+' F</span>');
+  html+='</table>';
+  html+='<table style="font-size:14px">'+ligneTr('<span class="b">SOLDE</span>','<span class="b">'+(ttc-tp).toLocaleString('fr-FR')+' F</span>')+'</table>';
   html+='<div class="sep"></div>';
   html+='<div class="c" style="font-size:11px">Merci</div>';
   html+='</body></html>';
@@ -3859,7 +3887,17 @@ function ouvrirEtImprimerHTML(html,fmt,tentative){
   // passe" lors de la toute première impression). On ne s'appuie donc plus uniquement sur la
   // promesse d'imprimerSilencieux : si rien ne répond dans un délai raisonnable, on considère
   // ça comme un échec et on retente, exactement comme pour un vrai échec signalé.
-  var TIMEOUT_MS=12000;
+  //
+  // ATTENTION à la valeur de ce délai : on n'a AUCUN moyen d'annuler l'impression native déjà en
+  // cours côté Android une fois lancée (pas d'API de cancel). Si ce délai est trop court et se
+  // déclenche alors que l'impression est simplement LENTE (et non bloquée) — ce qui est
+  // désormais plus fréquent avec la pause ajoutée entre chaque tranche envoyée au H10S pour
+  // éviter de saturer son tampon (voir H10sPrinterDriver) — on relance une DEUXIÈME impression
+  // du même ticket PENDANT que la première tourne encore en arrière-plan : les deux jobs
+  // s'entremêlent sur la même imprimante et produisent un ticket tronqué/incohérent — sur
+  // Sunmi ET H10S, quel que soit le pilote, puisque le problème est ici, côté JS, pas dans un
+  // pilote en particulier. D'où une marge large plutôt qu'un délai serré.
+  var TIMEOUT_MS=40000;
   var reglee=false;
   var chrono=setTimeout(function(){
     if(reglee)return;

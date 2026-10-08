@@ -137,6 +137,18 @@ public class FssNativeBridge {
                 respond(callbackId, ok());
                 break;
             }
+            case "resetRole": {
+                // Efface UNIQUEMENT le rôle choisi (SharedPreferences "role"/"serverUrl") pour
+                // revenir à l'écran choice.html — ne touche JAMAIS aux données métier
+                // (filesDir/www/fss-data), qui vivent dans un répertoire totalement séparé (voir
+                // main.js/embedded-server.js). Si ce poste était "Serveur", on arrête aussi le
+                // service d'impression/serveur embarqué en arrière-plan avant de changer de rôle,
+                // pour ne pas laisser un serveur tourner "orphelin" sans écran associé.
+                prefs().edit().remove("role").remove("serverUrl").apply();
+                stopServerServiceInternal();
+                respond(callbackId, ok());
+                break;
+            }
             case "startServerService": {
                 Intent intent = new Intent(context, FssServerService.class);
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {

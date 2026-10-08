@@ -240,6 +240,16 @@
         return result;
       });
     },
+    // Efface le rôle choisi (Serveur/Poste client) et ramène sur choice.html — ne touche jamais
+    // aux données métier (ventes, stock, caisses…), stockées à part. Utilisé par le bouton
+    // "Changer de rôle" des Paramètres, pour les cas où un TPE a été mal configuré au départ ou
+    // doit changer de rôle sur le réseau sans réinstaller l'application.
+    resetRole: function () {
+      return call('resetRole', {}).then(function (result) {
+        window.location.href = 'choice.html';
+        return result;
+      });
+    },
     saveServer: function (ip, port) {
       return call('saveServer', { ip: ip, port: port }).then(function (result) {
         window.location.href = 'http://' + ip + ':' + (port || 3000) + '/';

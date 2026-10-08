@@ -95,6 +95,22 @@ public class H10sPrinterDriver implements PrinterDriver {
     // asynchrone par appel (contrairement à Sunmi), on découpe simplement en boucle synchrone.
     private static final int MAX_SLICE_BYTES = 256 * 1024;
 
+    // Contrairement à Sunmi (dont le SDK ne redonne la main, via onRunResult, qu'une fois CHAQUE
+    // tranche réellement imprimée — un rythme naturellement calé sur la vitesse physique de la
+    // tête d'impression), l'appel service.printBitmap() ici ne fait qu'empiler la tranche dans une
+    // file d'attente et rend la main immédiatement. Pour un ticket court (bon de commande, reçu,
+    // prélèvement — quelques tranches), ça ne pose pas de problème. Mais le bilan de clôture peut
+    // contenir des dizaines de tranches (une ligne par transaction + par article de la journée) :
+    // les envoyer en boucle serrée, sans aucune pause, peut saturer le tampon interne du module
+    // thermique 58mm — la fin du ticket est alors silencieusement perdue (aucune exception, aucune
+    // erreur renvoyée), exactement le symptôme observé uniquement sur ce ticket, le plus long de
+    // tous. On laisse donc au module le temps physique d'imprimer chaque tranche avant d'envoyer
+    // la suivante, avec une pause proportionnelle à sa hauteur (à 203dpi, une tête thermique 58mm
+    // imprime grossièrement 50 à 70 mm/s ; on prend une marge de sécurité généreuse).
+    private static final double PACING_MS_PER_PX = 3.0;
+    private static final int PACING_MIN_MS = 60;
+    private static final int PACING_MAX_MS = 500;
+
     @Override
     public void printBitmap(Bitmap bitmap, final Callback callback) {
         if (!isAvailable()) {
@@ -115,6 +131,17 @@ public class H10sPrinterDriver implements PrinterDriver {
                     service.printBitmap(slice);
                 } finally {
                     slice.recycle();
+                }
+                boolean derniereTranche = (y + height) >= totalHeight;
+                if (!derniereTranche) {
+                    long pauseMs = Math.max(PACING_MIN_MS,
+                            Math.min(PACING_MAX_MS, Math.round(height * PACING_MS_PER_PX)));
+                    try {
+                        Thread.sleep(pauseMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
             service.nextLine(4);
