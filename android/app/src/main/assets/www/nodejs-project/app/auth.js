@@ -154,7 +154,7 @@
       if (p1 !== p2) { err.textContent = 'Les mots de passe ne correspondent pas'; return; }
       u.mdp = p1;
       u.doitChangerMdp = false;
-      if (window.fssSyncPush) window.fssSyncPush();
+      window.usersRev = (window.usersRev || 0) + 1; if (window.fssSyncPush) window.fssSyncPush();
       ov.remove();
       if (forced) enterApp();
       else safeToast('Mot de passe modifié', 's');
@@ -310,7 +310,7 @@
       reader.onload = function (e) {
         logoData = e.target.result;
         window.logoData = logoData;
-        if (window.fssSyncPush) window.fssSyncPush();
+        window.usersRev = (window.usersRev || 0) + 1; if (window.fssSyncPush) window.fssSyncPush();
         safeToast('Logo mis à jour', 's');
       };
       reader.readAsDataURL(file);
@@ -479,7 +479,7 @@
     document.getElementById('umgtPermsGrid').style.display = '';
     document.getElementById('umgtPermsLabel').style.display = '';
     document.querySelectorAll('.umgtPermChk').forEach(function (c) { c.checked = false; });
-    if (window.fssSyncPush) window.fssSyncPush();
+    window.usersRev = (window.usersRev || 0) + 1; if (window.fssSyncPush) window.fssSyncPush();
     renderUserMgmt();
     if (window.renderServerSelect) window.renderServerSelect();
     safeToast('Utilisateur ajouté', 's');
@@ -492,7 +492,7 @@
     if (!confirm('Supprimer l\'utilisateur "' + u.nom + '" ?')) return;
     users = users.filter(function (x) { return x.id !== id; });
     window.users = users;
-    if (window.fssSyncPush) window.fssSyncPush();
+    window.usersRev = (window.usersRev || 0) + 1; if (window.fssSyncPush) window.fssSyncPush();
     renderUserMgmt();
     if (window.renderServerSelect) window.renderServerSelect();
     safeToast('Utilisateur supprimé', 'i');
@@ -555,7 +555,7 @@
         var perms = [];
         document.querySelectorAll('.permsChk').forEach(function (c) { if (c.checked) perms.push(c.value); });
         u.perms = perms;
-        if (window.fssSyncPush) window.fssSyncPush();
+        window.usersRev = (window.usersRev || 0) + 1; if (window.fssSyncPush) window.fssSyncPush();
         document.getElementById('permsOverlay').style.display = 'none';
         var mgmt = document.getElementById('userMgmtOverlay');
         if (mgmt) mgmt.style.display = 'flex';

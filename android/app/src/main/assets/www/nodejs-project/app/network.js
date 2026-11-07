@@ -13,86 +13,9 @@
   // écraser silencieusement le vrai catalogue enregistré sur le serveur
   // (articles, catégories, etc. semblent alors "disparaître" pour tout le monde).
   var initialStateLoaded = false;
+  var prevBatchIds = null;
   var prevTxIds = null;
-  // --- Journal technique persistant --------------------------------------------------------
-  // Sans matériel de test disponible ni accès ADB, chaque nouvelle hypothèse sur le bon de
-  // commande manquant ne peut être vérifiée qu'en installant un build et en attendant un retour
-  // de l'utilisateur — lent, et sans aucune certitude sur ce qui échoue réellement en interne.
-  // Ce journal enregistre, avec horodatage, chaque étape du circuit d'impression automatique
-  // (réception d'un état, lots détectés comme nouveaux, tentative d'impression, résultat), pour
-  // que l'utilisateur puisse le consulter et le copier depuis Paramètres > Périphériques après
-  // un essai, sans outil technique — la seule vraie source d'information tant qu'on ne peut pas
-  // reproduire le problème directement.
-  var DEBUG_LOG_KEY = 'fss_debug_log_v1';
-  function fssLog(msg) {
-    try {
-      var raw = localStorage.getItem(DEBUG_LOG_KEY);
-      var arr = raw ? JSON.parse(raw) : [];
-      if (!(arr instanceof Array)) arr = [];
-      var h = new Date();
-      var horodatage = ('0' + h.getHours()).slice(-2) + ':' + ('0' + h.getMinutes()).slice(-2) + ':' + ('0' + h.getSeconds()).slice(-2);
-      arr.push(horodatage + ' — ' + msg);
-      if (arr.length > 300) arr = arr.slice(arr.length - 300);
-      localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(arr));
-    } catch (e) { /* stockage indisponible : tant pis pour cette entrée */ }
-  }
-  window.fssLog = fssLog;
-  window.fssGetLog = function () {
-    try {
-      var raw = localStorage.getItem(DEBUG_LOG_KEY);
-      var arr = raw ? JSON.parse(raw) : [];
-      return (arr instanceof Array) ? arr.join('\n') : '';
-    } catch (e) { return ''; }
-  };
-  window.fssClearLog = function () {
-    try { localStorage.removeItem(DEBUG_LOG_KEY); } catch (e) {}
-  };
-  fssLog('--- démarrage appli --- rôle=' + (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '' ? 'Serveur' : 'Client') + ' host=' + location.hostname);
-  // --- Suivi PERSISTANT des bons de commande déjà imprimés -----------------------------------
-  // Avant : ce suivi (prevBatchIds) n'existait qu'en mémoire (variable JS). Sur du matériel
-  // Android bas de gamme (type TPE H10S), le système tue très souvent l'activité/la WebView en
-  // arrière-plan pour économiser la batterie (gestion "auto-démarrage"/"appli protégée" très
-  // agressive sur ces ROM constructeur), même quand un service de premier plan tourne encore.
-  // À chaque redémarrage de l'activité, prevBatchIds repartait de zéro (null), et la toute
-  // première synchronisation qui suit marque alors TOUS les bons de commande déjà en attente
-  // (y compris ceux jamais imprimés à cause du redémarrage) comme "déjà connus" — ils ne sont
-  // alors plus JAMAIS imprimés, silencieusement, sans la moindre erreur visible. C'est ce qui
-  // explique un bon de commande qui ne sort "jamais" du TPE alors que l'addition/le reçu
-  // (imprimés manuellement, appli forcément au premier plan à ce moment) fonctionnent bien.
-  // Fix : mémoriser les identifiants des lots déjà imprimés dans localStorage, qui survit aux
-  // redémarrages de l'activité/du processus. Un lot n'est marqué "imprimé" qu'après la tentative
-  // d'impression elle-même, jamais juste parce qu'il a été "vu" une fois.
-  var PRINTED_BATCH_IDS_KEY = 'fss_printed_batch_ids_v1';
-  var printedBatchIds = null; // null = pas encore chargé depuis localStorage
-  function chargerLotsImprimes() {
-    if (printedBatchIds !== null) return printedBatchIds;
-    try {
-      var raw = localStorage.getItem(PRINTED_BATCH_IDS_KEY);
-      var parsed = raw ? JSON.parse(raw) : null;
-      printedBatchIds = (parsed && parsed instanceof Array) ? parsed : null;
-    } catch (e) {
-      printedBatchIds = null;
-    }
-    return printedBatchIds;
-  }
-  function sauverLotsImprimes(arr) {
-    // On garde seulement les 500 derniers identifiants pour éviter une croissance illimitée du
-    // stockage local au fil des mois (printBatches lui-même n'est jamais purgé côté serveur).
-    var trimmed = arr.length > 500 ? arr.slice(arr.length - 500) : arr;
-    printedBatchIds = trimmed;
-    try {
-      localStorage.setItem(PRINTED_BATCH_IDS_KEY, JSON.stringify(trimmed));
-    } catch (e) {
-      // Stockage plein/indisponible : on continue en mémoire pour cette session, tant pis pour
-      // la persistance — ce n'est pas pire que l'ancien comportement 100% en mémoire.
-    }
-  }
   window.FSS_IS_SERVER = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '');
-  // Identifiant unique de ce poste pour la durée de la session (re-généré à chaque
-  // rechargement) — permet à un poste client de reconnaître "ses propres" bons de
-  // commande dans le flux synchronisé, pour imprimer sa copie localement sans imprimer
-  // aussi celles des autres postes.
-  window.FSS_POSTE_ID = 'poste-' + Math.random().toString(36).slice(2) + '-' + Date.now();
   window.users = window.users || [];
   window.nextUserId = window.nextUserId || 1;
   window.logoData = window.logoData || null;
@@ -109,11 +32,12 @@
   window.pointages = window.pointages || [];
   window.paieEntries = window.paieEntries || [];
 
+  var cmdEnVol = {}, retraitsEnVol = {};
   function fullState() {
     return {
       arts: arts, clis: clis, fours: fours, cmds: cmds, txs: txs, mouv: mouv,
-      prls: prls, cmdAttente: cmdAttente, nextTk: nextTk, attenteSeq: attenteSeq,
-      users: users, nextUserId: nextUserId, logo: logoData, etab: etabInfo, tables: tables, servers: servers, caisses: caisses, categories: categories, fondsOuverture: fondsOuverture, printBatches: printBatches,
+      prls: prls, entrees: entrees, cmdAttente: cmdAttente, nextTk: nextTk, attenteSeq: attenteSeq,
+      users: users, nextUserId: nextUserId, usersRev: window.usersRev || 0, logo: logoData, etab: etabInfo, tables: tables, servers: servers, caisses: caisses, categories: categories, fondsOuverture: fondsOuverture, printBatches: printBatches,
       clotureHistorique: clotureHistorique,
       categoryAlerteActive: categoryAlerteActive,
       artsUpdatedAt: window.artsUpdatedAt || 0,
@@ -147,48 +71,65 @@
     prevTxIds = txs.map(function (t) { return t.id; });
     mouv = s.mouv || [];
     prls = s.prls || [];
-    cmdAttente = s.cmdAttente || [];
+    entrees = s.entrees || [];
+    var idsAvantReception = cmdAttente.map(function (c) { return c.id; });
+    cmdAttente = (s.cmdAttente || []).filter(function (c) { return !retraitsEnVol[c.id]; });
+    Object.keys(cmdEnVol).forEach(function (id) {
+      var i = cmdAttente.findIndex(function (c) { return c.id === id; });
+      if (i >= 0) cmdAttente[i] = cmdEnVol[id]; else cmdAttente.push(cmdEnVol[id]);
+    });
+    var idsApresReception = cmdAttente.map(function (c) { return c.id; });
+    if (idsAvantReception.join(',') !== idsApresReception.join(',')) {
+      logDistant('applyState met à jour cmdAttente sur ce poste : avant=[' + idsAvantReception.join(',') + '] après=[' + idsApresReception.join(',') + ']');
+    }
     printBatches = s.printBatches || [];
-    var lotsConnus = chargerLotsImprimes();
-    fssLog('applyState: printBatches reçus=' + printBatches.length + ' lotsConnus=' + (lotsConnus === null ? 'null(1re sync)' : lotsConnus.length));
-    if (lotsConnus === null) {
-      // Première synchronisation jamais vue sur cet appareil (installation neuve, ou stockage
-      // local effacé) : comme avant, on ne réimprime pas l'historique déjà présent au moment
-      // de ce tout premier chargement — on le marque directement comme "déjà traité".
-      sauverLotsImprimes(printBatches.map(function (bt) { return bt.batchId; }));
-      fssLog('applyState: 1re synchro sur cet appareil, ' + printBatches.length + ' lot(s) existants marqués comme déjà traités (non imprimés)');
-    } else {
-      // Même circuit, même écouteur pour tout ce qui doit s'imprimer côté Serveur : bon de
-      // commande cuisine ET bilan de clôture — aucune différence de traitement entre les deux.
-      // Poste client (TPE ou PC) : n'imprime QUE ses propres bons de commande (jamais ceux des
-      // autres postes, jamais les bilans de clôture — réservés au serveur).
-      var nouveauxLots = printBatches.filter(function (bt) {
-        if (lotsConnus.indexOf(bt.batchId) !== -1) return false;
-        if (window.FSS_IS_SERVER) return true;
-        return bt.type !== 'cloture' && bt.posteId === window.FSS_POSTE_ID;
-      });
-      fssLog('applyState: ' + nouveauxLots.length + ' nouveau(x) lot(s) à imprimer' + (nouveauxLots.length ? ' : ' + nouveauxLots.map(function(bt){return bt.batchId+'('+(bt.type||'commande')+')';}).join(', ') : ''));
+    if (prevBatchIds !== null) {
+      var nouveauxLots = printBatches.filter(function (bt) { return prevBatchIds.indexOf(bt.batchId) === -1; });
       if (nouveauxLots.length) {
+        logDistant('applyState reçoit ' + nouveauxLots.length + ' nouveau(x) lot(s) : ' + nouveauxLots.map(function(b){return b.batchId;}).join(', ') + ' — FSS_IS_SERVER=' + window.FSS_IS_SERVER + ' (hostname=' + location.hostname + ')');
+      }
+      if (window.FSS_IS_SERVER) {
         nouveauxLots.forEach(function (batch) {
-          fssLog('impression: tentative lot ' + batch.batchId + ' type=' + (batch.type || 'commande') + ' table=' + (batch.tableNom || '?'));
           safe(function () {
+            // Même circuit, même écouteur pour tout ce qui doit s'imprimer côté
+            // Serveur : bon de commande cuisine ET bilan de clôture — aucune
+            // différence de traitement entre les deux, pour garantir que la
+            // clôture fonctionne exactement aussi bien depuis un téléphone que
+            // les bons de commande, dont on sait qu'ils fonctionnent déjà.
             if (batch.type === 'cloture') {
-              if (window.imprimerBilanClotureAuto) window.imprimerBilanClotureAuto(batch.snapshot);
-              else fssLog('impression: ERREUR imprimerBilanClotureAuto introuvable sur window');
+              logDistant('Tentative impression clôture pour lot ' + batch.batchId);
+              if (window.imprimerBilanClotureAuto) { window.fssProfilImprOverride = batch.profil || null; try { window.imprimerBilanClotureAuto(batch.snapshot); } finally { window.fssProfilImprOverride = null; } }
+            } else if (batch.type === 'tiroir') {
+              if (window.fssOuvrirTiroirLocal) window.fssOuvrirTiroirLocal(batch.pay);
+            } else if (batch.type === 'ticket') {
+              logDistant('Tentative impression ticket de caisse pour lot ' + batch.batchId + (batch.copies ? (' (' + batch.copies.length + ' exemplaire(s))') : ''));
+              if (window.imprimerSilencieux) {
+                if (batch.copies && batch.copies.length > 1) {
+                  // Même précaution que sur le poste Serveur lui-même : un
+                  // travail d'impression séparé par exemplaire.
+                  batch.copies.forEach(function (corpsExemplaire, idx) {
+                    var htmlExemplaire = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' + (batch.css || '') + '</style></head><body>' + corpsExemplaire + '</body></html>';
+                    setTimeout(function () { window.imprimerSilencieux(htmlExemplaire, { kind: 'ticket', profil: batch.profil, posteId: batch.posteId }); }, idx * 300);
+                  });
+                } else {
+                  window.imprimerSilencieux(batch.html, { kind: 'ticket', profil: batch.profil, posteId: batch.posteId });
+                }
+              }
             } else {
+              logDistant('Tentative impression bon de commande pour lot ' + batch.batchId + ' (table: ' + batch.tableNom + ', articles: ' + (batch.items||[]).length + ')');
               if (window.imprimerTicketAttente) window.imprimerTicketAttente(batch);
-              else fssLog('impression: ERREUR imprimerTicketAttente introuvable sur window');
             }
-          }, 'lot ' + batch.batchId);
+          });
         });
-        sauverLotsImprimes(lotsConnus.concat(nouveauxLots.map(function (bt) { return bt.batchId; })));
       }
     }
+    prevBatchIds = printBatches.map(function (bt) { return bt.batchId; });
     clotureHistorique = s.clotureHistorique || [];
     window.clotureHistorique = clotureHistorique;
     nextTk = s.nextTk || 1;
     attenteSeq = s.attenteSeq || 1;
     users = s.users || [];
+    window.usersRev = s.usersRev || 0;
     nextUserId = s.nextUserId || 1;
     logoData = s.logo || null;
     etabInfo = s.etab || { nom: 'FSS-CAISSE', tel: '', adr: '', rccm: '', nif: '', msgFin: 'Merci pour votre visite !' };
@@ -198,7 +139,7 @@
     window.servers = servers;
     if (s.caisses && s.caisses.length) caisses = s.caisses;
     window.caisses = caisses;
-    if (s.categories && s.categories.length) categories = s.categories;
+    if (Array.isArray(s.categories)) categories = s.categories;
     window.categories = categories;
     categoryAlerteActive = s.categoryAlerteActive || {};
     window.categoryAlerteActive = categoryAlerteActive;
@@ -217,20 +158,19 @@
     document.dispatchEvent(new Event('fss:ready'));
   }
 
-  function safe(fn, label) {
+  function safe(fn) { try { fn(); } catch (e) { /* la vue n'est peut-être pas encore prête */ } }
+  // Envoie une ligne de diagnostic au journal texte du serveur (sync-log.txt)
+  // — permet de suivre précisément ce qui se passe sur chaque poste sans
+  // avoir besoin d'ouvrir la console développeur. Best-effort, ne bloque rien
+  // si ça échoue.
+  function logDistant(message) {
     try {
-      fn();
-    } catch (e) {
-      // Avant : erreur totalement avalée, sans aucune trace — un bon de commande qui échoue
-      // pour une raison inattendue (autre que le fix ci-dessus) restait invisible pour
-      // toujours. On journalise maintenant dans le journal technique persistant (consultable
-      // depuis Paramètres > Périphériques) ET on tente un toast, utile si l'appli est au
-      // premier plan au moment de l'erreur.
-      var detail = (label ? label + ' : ' : '') + 'EXCEPTION ' + (e && e.message ? e.message : e) + (e && e.stack ? ' | ' + e.stack : '');
-      try { fssLog('safe(): ' + detail); } catch (e2) {}
-      try { console.error('[fss-print]', e && e.message ? e.message : e); } catch (e2) {}
-      try { if (window.toast) toast('⚠️ Erreur impression auto : ' + (e && e.message ? e.message : e), 'e'); } catch (e2) {}
-    }
+      fetch('/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message })
+      }).catch(function () {});
+    } catch (e) {}
   }
 
   function refreshAllViews() {
@@ -302,63 +242,137 @@
   // touche plus du tout à cmdAttente côté serveur (voir embedded-server.js).
   // Sans appeler cette route, une commande créée localement semblait
   // fonctionner un instant, puis disparaissait à la synchronisation suivante.
+  // Protection anti-disparition : tant qu'une commande envoyée (ou un retrait)
+  // n'est pas confirmé par le serveur (+ 4 s de marge pour les diffusions en
+  // retard), applyState() la conserve/l'exclut localement. Si le réseau coupe,
+  // l'envoi est RÉESSAYÉ automatiquement jusqu'à réussite : la table ne peut
+  // plus redevenir « libre » par erreur, quel que soit le nombre de postes.
+  window.fssCmdEnVol = cmdEnVol; window.fssRetraitsEnVol = retraitsEnVol;
+  function postJsonAvecRetry(url, corps, onOk) {
+    var essai = function () {
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) })
+        .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); onOk(); })
+        .catch(function () { setTimeout(essai, 3000); });
+    };
+    essai();
+  }
+  // Après expiration de la protection, on resynchronise avec le serveur : si une
+  // commande a été retirée ailleurs entre-temps, elle disparaît ici aussi.
+  function resyncCmdAttente() {
+    fetch(API).then(function (r) { return r.json(); }).then(function (s) {
+      if (s && Array.isArray(s.cmdAttente)) {
+        var avant = cmdAttente.map(function (c) { return c.id; }).sort().join(',');
+        var apres = s.cmdAttente.filter(function (c) { return !retraitsEnVol[c.id] && !cmdEnVol[c.id]; }).map(function (c) { return c.id; });
+        Object.keys(cmdEnVol).forEach(function (id) { apres.push(id); });
+        if (avant !== apres.sort().join(',')) applyState(s);
+      }
+    }).catch(function () {});
+  }
   function envoyerCmdAttente(commande) {
-    return fetch('/api/cmdattente/ajouter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(commande)
-    }).catch(function () {
-      safe(function () { toast('⚠️ Impossible d\'envoyer la commande au serveur — vérifiez la connexion', 'e'); });
+    delete retraitsEnVol[commande.id];
+    cmdEnVol[commande.id] = commande;
+    return new Promise(function (resolve) {
+      postJsonAvecRetry('/api/cmdattente/ajouter', commande, function () {
+        setTimeout(function () { if (cmdEnVol[commande.id] === commande) delete cmdEnVol[commande.id]; resyncCmdAttente(); }, 4000);
+        resolve();
+      });
     });
   }
-  function retirerCmdAttente(id) {
-    return fetch('/api/cmdattente/retirer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: id })
-    }).catch(function () {
-      safe(function () { toast('⚠️ Impossible de synchroniser la suppression — vérifiez la connexion', 'e'); });
-    });
+  // Identifiant stable de CE poste (généré une fois, conservé) + nom de l'ordinateur.
+  // Sert à savoir quel poste a émis un bon de commande, pour l'envoyer sur les
+  // imprimantes que le Serveur a affectées à ce poste.
+  var posteId = null;
+  try {
+    posteId = localStorage.getItem('fss-poste-id');
+    if (!posteId) {
+      posteId = 'PC-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      localStorage.setItem('fss-poste-id', posteId);
+    }
+  } catch (e) { posteId = posteId || ('PC-' + Math.random().toString(36).slice(2, 8)); }
+  window.FSS_POSTE_ID = posteId;
+  // Sur un téléphone/navigateur (pas d'application Windows), le nom de l'hôte serait l'adresse du
+  // Serveur, identique pour tous : on fabrique un nom lisible (type + modèle + 4 derniers caractères).
+  function nomPosteAuto() {
+    var ua = navigator.userAgent || '';
+    var type = /Android/i.test(ua) ? 'Téléphone Android' : /iPhone|iPad|iPod/i.test(ua) ? 'iPhone/iPad' : 'Navigateur';
+    var m = ua.match(/Android [\d.]+; ([^;)]+?)(?: Build|\))/);
+    var modele = m && m[1] && !/^(K|wv)$/.test(m[1].trim()) ? ' ' + m[1].trim() : '';
+    return type + modele + ' #' + String(posteId).slice(-4);
   }
-  // Envoie UN nouveau lot à imprimer (bon de commande ou bilan de clôture) via sa route dédiée
-  // du serveur, immédiatement — jamais via l'envoi de l'état complet (débounce de 150ms), pour
-  // exactement la même raison que cmdAttente ci-dessus. Sans cette route, le lot créé localement
-  // pouvait être silencieusement effacé de la mémoire du poste, avant même d'avoir été transmis
-  // au serveur, par l'écho de synchronisation d'une AUTRE action envoyée entre-temps (par ex.
-  // fssEnvoyerCmdAttente, qui répond quasi instantanément sur le poste "Serveur" en localhost) —
-  // voir le commentaire de /api/printbatch/ajouter dans embedded-server.js pour le détail complet
-  // de cette course, qui expliquait le bon de commande jamais imprimé sur ce poste précis.
-  function envoyerPrintBatch(batch) {
-    fssLog('envoyerPrintBatch: envoi immédiat du lot ' + (batch && batch.batchId) + ' vers /api/printbatch/ajouter');
-    return fetch('/api/printbatch/ajouter', {
+  window.FSS_POSTE_NOM = (window.electronAPI && window.electronAPI.getHostname) ? (location.hostname || 'Poste') : nomPosteAuto();
+  function signalerPoste() {
+    var nom = window.FSS_POSTE_NOM;
+    var envoi = function (n) {
+      fetch('/api/postes/hello', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: posteId, nom: n, serveur: !!window.FSS_IS_SERVER })
+      }).catch(function () {});
+    };
+    if (window.electronAPI && window.electronAPI.getHostname) {
+      window.electronAPI.getHostname().then(function (h) { window.FSS_POSTE_NOM = h || nom; envoi(h || nom); }).catch(function () { envoi(nom); });
+    } else { envoi(nom); }
+  }
+  signalerPoste();
+  setInterval(signalerPoste, 60000);
+
+  function envoyerBonCommande(batch) {
+    batch.posteId = batch.posteId || posteId;
+    batch.posteNom = batch.posteNom || window.FSS_POSTE_NOM;
+    if (!batch.profil && window.fssProfilImpression) batch.profil = window.fssProfilImpression();
+    return fetch('/api/printbatches/ajouter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(batch)
-    }).then(function (r) {
-      fssLog('envoyerPrintBatch: réponse serveur ok=' + (r && r.ok));
-      return r;
-    }).catch(function (e) {
-      fssLog('envoyerPrintBatch: EXCEPTION réseau — ' + (e && e.message ? e.message : e));
+    }).catch(function () {
       safe(function () { toast('⚠️ Impossible d\'envoyer le bon de commande au serveur — vérifiez la connexion', 'e'); });
     });
   }
-
-  // Archive UNE clôture via la route dédiée (voir /api/cloture/archiver dans embedded-server.js).
   function envoyerClotureArchive(entree) {
     return fetch('/api/cloture/archiver', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(entree)
     }).catch(function () {
-      safe(function () { toast('⚠️ Archive de la clôture non transmise au serveur — vérifiez la connexion', 'e'); });
+      safe(function () { toast('⚠️ Impossible d\'archiver la clôture sur le serveur — vérifiez la connexion', 'e'); });
     });
   }
-  window.fssEnvoyerClotureArchive = envoyerClotureArchive;
+  function retirerCmdAttente(id) {
+    delete cmdEnVol[id];
+    retraitsEnVol[id] = true;
+    return new Promise(function (resolve) {
+      postJsonAvecRetry('/api/cmdattente/retirer', { id: id }, function () {
+        setTimeout(function () { delete retraitsEnVol[id]; resyncCmdAttente(); }, 4000);
+        resolve();
+      });
+    });
+  }
+  function enregistrerTable(table) {
+    return fetch('/api/tables/enregistrer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(table)
+    }).catch(function () {
+      safe(function () { toast('⚠️ Impossible d\'enregistrer la table sur le serveur — vérifiez la connexion', 'e'); });
+    });
+  }
+  function supprimerTable(n) {
+    return fetch('/api/tables/supprimer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ n: n })
+    }).catch(function () {
+      safe(function () { toast('⚠️ Impossible de synchroniser la suppression de la table — vérifiez la connexion', 'e'); });
+    });
+  }
+
   window.fssSyncPush = syncPush;
   window.fssSyncPushImmediate = syncPushImmediate;
   window.fssEnvoyerCmdAttente = envoyerCmdAttente;
+  window.fssEnvoyerBonCommande = envoyerBonCommande;
   window.fssRetirerCmdAttente = retirerCmdAttente;
-  window.fssEnvoyerPrintBatch = envoyerPrintBatch;
+  window.fssEnvoyerClotureArchive = envoyerClotureArchive;
+  window.fssEnregistrerTable = enregistrerTable;
+  window.fssSupprimerTable = supprimerTable;
   // Si l'app se ferme (fermeture manuelle, redémarrage...), on force
   // immédiatement l'envoi de tout changement en attente, et on prévient le
   // processus principal une fois que c'est VRAIMENT terminé (pas juste lancé)
@@ -394,13 +408,35 @@
   // jour un horodatage dédié, pour que le serveur puisse toujours reconnaître
   // et garder la VRAIE dernière mise à jour, même si un autre poste, avec une
   // version plus ancienne du catalogue, envoie un changement juste après.
-  var FONCTIONS_ARTICLES = ['saveArt', 'delArt', 'togArt', 'importArticles', 'viderArticles'];
+  function envoyerChangementsArticles(avant) {
+    try {
+      var liste = window.arts || arts || [], apres = {}, upserts = [], supprimes = [];
+      liste.forEach(function (x) {
+        apres[x.id] = true;
+        if (avant[x.id] !== JSON.stringify(x)) upserts.push(x);
+      });
+      Object.keys(avant).forEach(function (id) {
+        if (!apres[id]) { var n = Number(id); supprimes.push(String(n) === id ? n : id); }
+      });
+      if (upserts.length || supprimes.length) postJsonAvecRetry('/api/arts/maj', { upserts: upserts, supprimes: supprimes }, function () {});
+    } catch (e) {}
+  }
+  window.fssArtsSupprimer = function (ids) { try { postJsonAvecRetry('/api/arts/maj', { upserts: [], supprimes: ids }, function () {}); } catch (e) {} };
+  var FONCTIONS_ARTICLES = ['saveArt', 'delArt', 'togArt', 'importArticles', 'viderArticles', 'saveStk', 'toggleAlerteCategorie'];
   function wrap(name) {
     var orig = window[name];
     if (typeof orig !== 'function') return;
     window[name] = function () {
+      var estArticle = FONCTIONS_ARTICLES.indexOf(name) !== -1;
+      var avant = null;
+      if (estArticle) { avant = {}; (window.arts || arts || []).forEach(function (x) { avant[x.id] = JSON.stringify(x); }); }
       var r = orig.apply(this, arguments);
-      if (FONCTIONS_ARTICLES.indexOf(name) !== -1) window.artsUpdatedAt = Date.now();
+      if (estArticle) {
+        window.artsUpdatedAt = Date.now();
+        // Envoi IMMÉDIAT au serveur des seuls articles ajoutés / modifiés / supprimés (fusion côté
+        // serveur) — un seul article suffit, sans dépendre de la synchronisation complète.
+        envoyerChangementsArticles(avant);
+      }
       syncPush();
       return r;
     };
@@ -412,11 +448,17 @@
     'saveCmd', 'delCmd', 'valPay', 'addPrel', 'razCaisse',
     'mettreEnAttente', 'reprendreAttente', 'supprimerAttente',
     'saveEmp', 'delEmp', 'clockIn', 'clockOut', 'savePointageManuel', 'delPointage', 'savePaieDetail',
-    'importArticles', 'viderArticles'
+    'importArticles', 'viderArticles', 'toggleAlerteCategorie'
   ].forEach(wrap);
 
   if (socket) {
     socket.on('state:changed', function (s) { applyState(s); });
+    // Erreur d'impression renvoyée par le Serveur (imprimante éteinte, injoignable...) :
+    // affichée uniquement sur le poste qui avait envoyé le bon.
+    socket.on('print:error', function (e) {
+      if (!e || (e.posteId && e.posteId !== posteId)) return;
+      safe(function () { toast('❌ ' + (e.message || 'Erreur d\'impression'), 'e'); });
+    });
     socket.on('connect', function () {
       safe(function () { toast('Connecté au serveur FSS-CAISSE', 's'); });
     });

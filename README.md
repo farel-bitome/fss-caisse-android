@@ -302,3 +302,15 @@ tant que ces fichiers n'atteignaient jamais GitHub du tout.**
   individuelle sont vérifiées contre la documentation/le code source réel des outils utilisés
   (Capacitor, nodejs-mobile-cordova, SDK Sunmi), mais un premier build sur GitHub Actions peut
   faire remonter des ajustements mineurs (versions de dépendances, chemins).
+
+
+## Mise à jour v7 — alignement sur FSS-CAISSE .exe v42
+
+Le frontend (`app/*`) et le serveur embarqué (`embedded-server.js`, `server-data/`) du TPE sont désormais
+exactement ceux de FSS-CAISSE .exe v42 : Crédit + Impayés (bons employés), clôture par serveur / caissier /
+période, entrées et sorties de caisse, tables occupées verrouillées, une commande par table, tickets en Arial
+(12 px en 80 mm, 11 px en 58 mm), clavier AZERTY complet, catégories et gestion de stock par catégorie, etc.
+
+Sans objet sur un TPE Android (réglages masqués automatiquement) : afficheur client et tiroir-caisse par port série
+Windows, IP fixe Windows. Les fonctions « Dépenses », « Ventes par serveur » et les rapports Impayés / Entrées /
+Sorties de l'ancienne copie du TPE n'existent pas dans le .exe v42 et ont donc été retirées.

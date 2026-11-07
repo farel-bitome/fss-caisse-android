@@ -291,6 +291,9 @@
     // Pas d'équivalent "fermeture de fenêtre" pertinent sur mobile (l'OS gère le cycle de vie) —
     // no-op pour ne jamais faire planter network.js.
     onFlushAvantFermeture: function (cb) { window.__fssFlushCallback = cb; },
-    confirmerFlushTermine: function () { return Promise.resolve(true); }
+    confirmerFlushTermine: function () { return Promise.resolve(true); },
+    // Sans objet sur un TPE Android (existent côté Windows) : valeurs neutres pour que rien ne plante.
+    refocus: function () {},
+    getHostname: function () { return Promise.resolve('TPE'); }
   };
 })();
