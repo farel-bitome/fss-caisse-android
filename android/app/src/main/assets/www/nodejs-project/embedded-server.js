@@ -34,67 +34,31 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     const pvitConfigFile = path.join(userDataDir, 'pvit-config.json');
 
     function loadState() {
+      // RÈGLE : la base de données posée dans le dossier de l'application (data.json) est
+      // TOUJOURS celle qui est utilisée. Jamais de copie de secours, jamais de données par
+      // défaut, jamais de remplacement automatique quand data.json existe.
+      // - data.json absent  -> première installation : base vierge (données par défaut)
+      // - data.json présent -> il est lu tel quel ; s'il est illisible on S'ARRÊTE avec un message,
+      //   sans rien écrire ni remplacer (le fichier reste intact pour être réparé/remplacé).
       let state;
-      let sourceUtilisee = 'principale';
-      try {
-        if (fs.existsSync(dataFile)) {
-          state = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-        }
-      } catch (e) {
-        // Fichier principal corrompu (ex: l'app a planté en pleine écriture) —
-        // avant d'abandonner et de repartir sur des données vierges (ce qui
-        // effaçait TOUT : commandes en attente, ventes...), on tente d'abord
-        // de récupérer la dernière copie de secours valide.
-        console.error('Fichier de données principal illisible :', e.message);
+      if (fs.existsSync(dataFile)) {
+        let brut;
         try {
-          if (fs.existsSync(backupDataFile)) {
-            state = JSON.parse(fs.readFileSync(backupDataFile, 'utf8'));
-            sourceUtilisee = 'copie de secours';
-            console.log('Récupéré depuis la copie de secours (data.backup.json).');
-          }
-        } catch (e2) {
-          console.error('Copie de secours également illisible :', e2.message);
-        }
-      }
-      if (!state) {
-        console.error('Aucune donnée récupérable — démarrage sur les données par défaut (catalogue de base uniquement).');
-        return JSON.parse(fs.readFileSync(defaultFile, 'utf8'));
-      }
-      if (sourceUtilisee === 'copie de secours') {
-        // Réécrit immédiatement le fichier principal avec les données
-        // récupérées, pour que la copie corrompue ne traîne pas.
-        saveState(state);
-      }
-      // Migration unique : remplace le catalogue d'articles par le nouveau menu,
-      // sans toucher au reste des données déjà enregistrées (clients, ventes,
-      // personnel, etc.) — ne s'exécute qu'une seule fois grâce au marqueur.
-      // Base vierge : on ne réinjecte plus jamais de catalogue intégré. Les articles
-      // existants du client sont conservés tels quels.
-      state.menuMigratedV2 = true;
-      // Migration unique : corrige la liste des catégories (Paramètres) pour
-      // qu'elle corresponde réellement aux catégories utilisées par les
-      // articles — l'ancienne liste de démonstration ('Boissons', 'Bières'...)
-      // ne correspondait à aucun article réel, ce qui rendait notamment les
-      // réglages "gestion de stock par catégorie" inopérants (aucune
-      // correspondance exacte possible).
-      // Les catégories appartiennent à l'utilisateur : plus aucune migration ne les modifie.
-      state.categoriesMigratedV1 = true;
-      // Migration unique : remplace l'ancienne liste de tables de démonstration
-      // (8 tables) par les 400 tables demandées, toutes "Libre" par défaut —
-      // à l'utilisateur de marquer ensuite lui-même celles qui sont réservées
-      // ou occupées, via le formulaire d'édition d'une table.
-      if (!state.tablesMigratedV1) {
-        try {
-          const defaults = JSON.parse(fs.readFileSync(defaultFile, 'utf8'));
-          state.tables = defaults.tables;
-          state.tablesMigratedV1 = true;
-          saveState(state);
-          console.log('Migration : ' + defaults.tables.length + ' tables mises en place (toutes libres).');
+          brut = fs.readFileSync(dataFile, 'utf8');
+          if (brut.charCodeAt(0) === 0xFEFF) brut = brut.slice(1);
+          state = JSON.parse(brut);
         } catch (e) {
-          console.error('Erreur pendant la migration des tables :', e.message);
+          throw new Error('Le fichier de base de données (' + dataFile + ') est illisible : ' + e.message +
+            '. Il n\'a PAS été modifié ni remplacé. Remplacez-le par un fichier valide puis relancez le logiciel.');
         }
+        if (!state || typeof state !== 'object' || Array.isArray(state)) {
+          throw new Error('Le fichier de base de données (' + dataFile + ') ne contient pas une base valide. ' +
+            'Il n\'a PAS été modifié ni remplacé. Remplacez-le par un fichier valide puis relancez le logiciel.');
+        }
+        return state;
       }
-      return state;
+      console.error('Aucun fichier de données : première installation, base vierge.');
+      return JSON.parse(fs.readFileSync(defaultFile, 'utf8'));
     }
 
     // ---- Sauvegarde des données ----
