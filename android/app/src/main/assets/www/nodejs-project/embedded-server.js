@@ -73,13 +73,33 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     let saveEnAttente = null;
     let saveChaine = Promise.resolve();
     const fsp = fs.promises;
+    const dossierSauvegardes = path.join(userDataDir, 'sauvegardes');
+    let derniereCopie = 0;
+    // Sauvegardes : (1) une copie « data.backup.json » au plus toutes les 10 minutes — avant, elle était
+    // écrasée à CHAQUE écriture, donc une seule mauvaise écriture détruisait aussi la copie de secours ;
+    // (2) un instantané par jour conservé 14 jours dans le dossier « sauvegardes ».
+    function sauvegarderAvantEcriture() {
+      try {
+        if (!fs.existsSync(dataFile)) return;
+        const t = Date.now();
+        if (t - derniereCopie > 10 * 60 * 1000) { fs.copyFileSync(dataFile, backupDataFile); derniereCopie = t; }
+        fs.mkdirSync(dossierSauvegardes, { recursive: true });
+        const jour = new Date().toISOString().slice(0, 10);
+        const f = path.join(dossierSauvegardes, 'data-' + jour + '.json');
+        if (!fs.existsSync(f)) {
+          fs.copyFileSync(dataFile, f);
+          const anciens = fs.readdirSync(dossierSauvegardes).filter(function (n) { return /^data-\d{4}-\d{2}-\d{2}\.json$/.test(n); }).sort();
+          while (anciens.length > 14) { try { fs.unlinkSync(path.join(dossierSauvegardes, anciens.shift())); } catch (e) { break; } }
+        }
+      } catch (e) { /* la sauvegarde ne doit jamais bloquer une vente */ }
+    }
     function ecrireEtat(state) {
       const json = JSON.stringify(state);
       const tmpFile = dataFile + '.tmp';
-      // Copie de secours du dernier état VALIDE, puis écriture atomique (fichier temporaire + rename :
-      // un plantage en plein milieu ne peut jamais laisser un fichier de données à moitié écrit).
-      return fsp.copyFile(dataFile, backupDataFile).catch(() => {})
-        .then(() => fsp.writeFile(tmpFile, json))
+      // Écriture atomique (fichier temporaire + rename : un plantage en plein milieu ne peut jamais
+      // laisser un fichier de données à moitié écrit).
+      sauvegarderAvantEcriture();
+      return fsp.writeFile(tmpFile, json)
         .then(() => fsp.rename(tmpFile, dataFile))
         .catch((e) => console.error('Écriture des données impossible :', e && e.message));
     }
@@ -101,7 +121,7 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       try {
         const tmpFile = dataFile + '.tmp';
-        try { if (fs.existsSync(dataFile)) fs.copyFileSync(dataFile, backupDataFile); } catch (e) {}
+        sauvegarderAvantEcriture();
         fs.writeFileSync(tmpFile, JSON.stringify(s));
         fs.renameSync(tmpFile, dataFile);
       } catch (e) { console.error('Écriture finale impossible :', e && e.message); }
@@ -414,6 +434,11 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     expressApp.post('/api/state', (req, res) => {
       try {
         const nouvelEtat = req.body;
+        // Garde-fou : un corps vide / invalide / sans catalogue ne doit JAMAIS remplacer la base.
+        if (!nouvelEtat || typeof nouvelEtat !== 'object' || Array.isArray(nouvelEtat) || !Array.isArray(nouvelEtat.arts) || !Array.isArray(nouvelEtat.txs)) {
+          ecrireJournal('État reçu REFUSÉ (structure invalide) — base conservée');
+          return res.status(400).json({ ok: false, error: 'état invalide' });
+        }
         // cmdAttente n'est plus jamais accepté depuis cette route générique —
         // on garde toujours la version déjà connue du serveur, gérée à part
         // via les routes /api/cmdattente/*.

@@ -1262,6 +1262,8 @@ var clis=[];
 var fours=[];
 var cmds=[];
 var txs=[];
+// Tickets réellement encaissés (les tickets annulés restent visibles dans la liste mais ne comptent dans AUCUN total).
+function txsV(){return txs.filter(function(t){return t.stat!=='Annulé';});}
 var mouv=[];
 var prls=[],entrees=[],tkt=[],editArtId=null,editCliId=null,activeCat='Tout',payMode='esp',recAmt=0,nextTk=1;
 
@@ -1316,7 +1318,7 @@ function renderImpayes(){
   var b=g('bImp'),o=g('bImpOk');if(!b||!o)return;b.innerHTML='';o.innerHTML='';
   var tot=0;
   txs.forEach(function(t){
-    if(!t.creditNom)return;
+    if(!t.creditNom||t.stat==='Annulé')return;
     var tr=document.createElement('tr');
     if(!t.creditPaye){
       if(!t.creditEmploye)tot+=t.ttc;
@@ -1336,7 +1338,7 @@ function imprimerListeCredits(mode,statut){
   var titres={employes:'LISTE DES BONS EMPLOYÉS',clients:'LISTE DES CRÉDITS CLIENTS',tous:regles?'LISTE DES CRÉDITS':'LISTE DES IMPAYÉS'};
   if(regles)titres[mode]+=' RÉGLÉS';
   var liste=txs.filter(function(t){
-    if(!t.creditNom||(regles?!t.creditPaye:t.creditPaye))return false;
+    if(!t.creditNom||t.stat==='Annulé'||(regles?!t.creditPaye:t.creditPaye))return false;
     if(mode==='employes')return !!t.creditEmploye;
     if(mode==='clients')return !t.creditEmploye;
     return true;
@@ -1511,6 +1513,7 @@ function addTk(id){
   var gestionStockActive=stockGere(a);
   if(gestionStockActive&&a.stk<=0){toast('Stock insuffisant','e');return;}
   var ex=tkt.find(function(x){return x.id===id;});
+  if(ex&&gestionStockActive&&ex.qty+1>a.stk){toast('Stock insuffisant : '+a.nom+' (reste '+a.stk+')','e');return;}
   if(ex){ex.qty++;}else{tkt.push({id:id,nom:a.nom,pv:a.pv,qty:1,emo:a.emo});}
   renderTkt();updTotal();
 }
@@ -1549,12 +1552,16 @@ function chgQ(i,d){
     toast('Vous n\'avez pas le droit de réduire une quantité déjà envoyée','e');
     return;
   }
+  if(d>0){var aa=arts.find(function(x){return x.id===tkt[i].id;});if(aa&&stockGere(aa)&&tkt[i].qty+d>aa.stk){toast('Stock insuffisant : '+aa.nom+' (reste '+aa.stk+')','e');return;}}
   tkt[i].qty+=d;if(tkt[i].qty<=0)tkt.splice(i,1);renderTkt();updTotal();
 }
 function delI(i){if(!(typeof hasRetraitArticlePermission==='function'&&hasRetraitArticlePermission())){toast('Vous n\'avez pas le droit de retirer un article','e');return;}if(!confirm('Retirer cet article du ticket ?'))return;tkt.splice(i,1);renderTkt();updTotal();}
+function sousTotal(){return tkt.reduce(function(s,it){return s+Math.round(it.pv*it.qty);},0);}
+// Remise toujours entière et comprise entre 0 et le sous-total (une remise négative AUGMENTAIT le total).
+function getRemise(sub){var r=Math.round(parseFloat(g('remF').value)||0);if(r<0)r=0;if(r>sub)r=sub;return r;}
 function applyPct(){
-  var sub=tkt.reduce(function(s,it){return s+it.pv*it.qty;},0);
-  var pct=parseFloat(g('remP').value)||0;
+  var sub=sousTotal();
+  var pct=parseFloat(g('remP').value)||0;if(pct<0)pct=0;if(pct>100)pct=100;
   g('remF').value=Math.round(sub*pct/100)||'';updTotal();
 }
 // ---- TVA : entièrement retirée du logiciel sur demande — toujours désactivée ----
@@ -1564,16 +1571,16 @@ function applyTVAToggleUI(){}
 window.applyTVAFromEtab=function(){};
 function saveTVASettings(){}
 function updTotal(){
-  var sub=tkt.reduce(function(s,it){return s+it.pv*it.qty;},0);
-  var rem=parseFloat(g('remF').value)||0,base=Math.max(0,sub-rem);
+  var sub=sousTotal();
+  var rem=getRemise(sub),base=Math.max(0,sub-rem);
   var tva=tvaActif?Math.round(base*tvaRate):0,tot=base+tva;
   g('fSub').textContent=fmt(sub);g('fRem').textContent=fmt(rem);
   g('fTVA').textContent=fmt(tva);g('fTot').textContent=fmt(tot);if(g('fTVALbl'))g('fTVALbl').textContent='TVA '+(tvaActif?Math.round(tvaRate*100)+'%':'désactivée');
   updMobCart(tot);
 }
 function getTotal(){
-  var sub=tkt.reduce(function(s,it){return s+it.pv*it.qty;},0);
-  var rem=parseFloat(g('remF').value)||0,base=Math.max(0,sub-rem);
+  var sub=sousTotal();
+  var rem=getRemise(sub),base=Math.max(0,sub-rem);
   return base+(tvaActif?Math.round(base*tvaRate):0);
 }
 // ---- MODE MOBILE : tiroir ticket + barre flottante ----
@@ -2696,12 +2703,18 @@ function valPay(){
   if(payMode==='esp'&&recAmt<tot){toast('Montant insuffisant','e');return;}
   var creditNom='';
   if(payMode==='cred'){creditNom=((g('creditNom')&&g('creditNom').value)||'').trim();if(!creditNom){toast('Indiquez le nom de la personne','e');if(g('creditNom'))g('creditNom').focus();return;}}
-  tkt.forEach(function(it){var a=arts.find(function(x){return x.id===it.id;});if(a&&stockGere(a))a.stk=Math.max(0,a.stk-it.qty);});
+  // Vente impossible au-delà du stock : on refuse AVANT d'encaisser (jamais de stock négatif ni de « sortie fantôme »).
+  var manque=[];
+  tkt.forEach(function(it){var a=arts.find(function(x){return x.id===it.id;});if(a&&stockGere(a)&&it.qty>a.stk)manque.push(a.nom+' (demandé '+it.qty+', reste '+a.stk+')');});
+  if(manque.length){toast('Stock insuffisant : '+manque.join(' ; '),'e');return;}
+  tkt.forEach(function(it){var a=arts.find(function(x){return x.id===it.id;});if(a&&stockGere(a))a.stk=a.stk-it.qty;});
+  // Le serveur n'accepte le catalogue (donc le stock) que s'il est plus récent : sans ceci la baisse de stock d'une vente pouvait être ignorée.
+  window.artsUpdatedAt=Date.now();
   var now=new Date();
   var dd=('0'+now.getDate()).slice(-2),mm=('0'+(now.getMonth()+1)).slice(-2);
   var hh=('0'+now.getHours()).slice(-2),mi=('0'+now.getMinutes()).slice(-2);
   var ht=tvaActif?Math.round(tot/(1+tvaRate)):tot,nb=tkt.reduce(function(s,i){return s+i.qty;},0);
-  var itemsSnapshot=tkt.map(function(it){return {nom:it.nom,qty:it.qty,pv:it.pv};});
+  var itemsSnapshot=tkt.map(function(it){return {id:it.id,nom:it.nom,qty:it.qty,pv:it.pv};});
   var recu=payMode==='esp'?recAmt:(payMode==='cred'?0:tot);
   var rendu=payMode==='esp'?Math.max(0,recAmt-tot):0;
   var caissier=(window.currentUser&&window.currentUser.nom)?window.currentUser.nom:'—';
@@ -2711,6 +2724,7 @@ function valPay(){
   nextTk++;g('tkNum').textContent='TK-#'+('000'+nextTk).slice(-4);
   // Commande reprise depuis « En attente » : elle est maintenant PAYÉE, c'est le seul moment (avec
   // l'annulation ✕) où elle sort de la liste et où sa table redevient libre.
+  var resumingAttenteIdAvant=!!resumingAttenteId;
   if(resumingAttenteId){
    try{
     var idPayee=resumingAttenteId;
@@ -2730,6 +2744,8 @@ function valPay(){
   }
   resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;resumingNumero=null;
   var tkValide=txs[0];
+  // Vente enregistrée tout de suite côté serveur (et non après le délai habituel) : une coupure juste après l'encaissement ne la perd plus.
+  try{if(!resumingAttenteIdAvant&&window.fssSyncPushImmediate)window.fssSyncPushImmediate();}catch(e){}
   // Chaque étape est isolée : une erreur dans l'une d'elles ne doit JAMAIS empêcher l'affichage de la facture.
   [function(){closeM('ovPay');},function(){clearTk(true);},function(){libererTable();},function(){renderProds('');},function(){renderStk();},function(){renderTkList();},function(){renderRap();},function(){initCloture();}].forEach(function(f){try{f();}catch(e){console.error('valPay:',e);}});
   try{afficherRecu(tkValide);}catch(e){
@@ -3758,7 +3774,7 @@ function renderTkList(){var b=g('bTk');if(!b)return;b.innerHTML='';var canR=(typ
 function renderDV(){var b=g('bDV');if(!b)return;b.innerHTML='';arts.forEach(function(a){var q=Math.floor(Math.random()*12)+3,ca=q*a.pv,ht=Math.round(ca/1.18),mg=a.pa?Math.round((a.pv-a.pa)*q):0;var tr=document.createElement('tr');tr.innerHTML='<td>'+a.emo+' '+a.nom+'</td><td><span class="badge bo">'+a.cat+'</span></td><td>'+q+'</td><td>'+fmt(a.pv)+'</td><td>'+fmt(ht)+'</td><td>'+fmt(ca-ht)+'</td><td><strong>'+fmt(ca)+'</strong></td><td style="color:#4488FF">'+fmt(mg)+'</td>';b.appendChild(tr);});}
 function renderLV(){var b=g('bLV');if(!b)return;b.innerHTML='';txs.forEach(function(t){var tr=document.createElement('tr');tr.innerHTML='<td>'+t.date+'</td><td style="color:#CC0000"><strong>'+t.id+'</strong></td><td>—</td><td>'+fmt(t.ht)+'</td><td>0 FCFA</td><td>'+fmt(t.tva)+'</td><td><strong>'+fmt(t.ttc)+'</strong></td><td><span class="badge '+(t.pay==='Espèces'?'bg':'bo')+'">'+t.pay+'</span></td>';b.appendChild(tr);});}
 function renderReg(){var b=g('bReg');if(!b)return;b.innerHTML='';txs.forEach(function(t){var tr=document.createElement('tr');tr.innerHTML='<td>'+t.date+'</td><td><strong>'+t.id+'</strong></td><td><span class="badge '+(t.pay==='Espèces'?'bg':'bo')+'">'+t.pay+'</span></td><td><strong>'+fmt(t.ttc)+'</strong></td><td>'+(t.pay==='Espèces'?fmt(Math.ceil(t.ttc/1000)*1000-t.ttc):'—')+'</td><td>admin</td>';b.appendChild(tr);});}
-function renderRegG(){var b=g('bRegG');if(!b)return;b.innerHTML='';var tot=txs.reduce(function(s,t){return s+t.ttc;},0),modes={};txs.forEach(function(t){if(!modes[t.pay])modes[t.pay]={nb:0,tot:0};modes[t.pay].nb++;modes[t.pay].tot+=t.ttc;});Object.keys(modes).forEach(function(k){var d=modes[k];var tr=document.createElement('tr');tr.innerHTML='<td><span class="badge '+(k==='Espèces'?'bg':'bo')+'">'+k+'</span></td><td>'+d.nb+'</td><td><strong>'+fmt(d.tot)+'</strong></td><td>'+(tot?Math.round(d.tot/tot*100):0)+'%</td>';b.appendChild(tr);});}
+function renderRegG(){var b=g('bRegG');if(!b)return;b.innerHTML='';var tot=txsV().reduce(function(s,t){return s+t.ttc;},0),modes={};txsV().forEach(function(t){if(!modes[t.pay])modes[t.pay]={nb:0,tot:0};modes[t.pay].nb++;modes[t.pay].tot+=t.ttc;});Object.keys(modes).forEach(function(k){var d=modes[k];var tr=document.createElement('tr');tr.innerHTML='<td><span class="badge '+(k==='Espèces'?'bg':'bo')+'">'+k+'</span></td><td>'+d.nb+'</td><td><strong>'+fmt(d.tot)+'</strong></td><td>'+(tot?Math.round(d.tot/tot*100):0)+'%</td>';b.appendChild(tr);});}
 function renderTopV(){var b=g('bTop');if(!b)return;b.innerHTML='';[].concat(arts).sort(function(a,c){return c.pv-a.pv;}).slice(0,10).forEach(function(a,i){var q=20-i,ca=q*a.pv;var tr=document.createElement('tr');tr.innerHTML='<td style="color:#CC0000"><strong>#'+(i+1)+'</strong></td><td>'+a.emo+' '+a.nom+'</td><td><span class="badge bo">'+a.cat+'</span></td><td>'+q+'</td><td><strong>'+fmt(ca)+'</strong></td><td>'+Math.round(ca/800000*100)+'%</td>';b.appendChild(tr);});}
 function renderTotCat(){var b=g('bTotCat');if(!b)return;b.innerHTML='';var cats={};arts.forEach(function(a){if(!cats[a.cat])cats[a.cat]=[];cats[a.cat].push(a);});Object.keys(cats).forEach(function(cat){var as=cats[cat],ttc=as.reduce(function(s,a){return s+(Math.floor(Math.random()*8)+2)*a.pv;},0),ht=Math.round(ttc/1.18),mg=Math.round(ttc*.35);var tr=document.createElement('tr');tr.innerHTML='<td><span class="badge bo">'+cat+'</span></td><td>'+as.length+'</td><td>'+(as.length*5)+'</td><td>'+fmt(ht)+'</td><td>'+fmt(ttc-ht)+'</td><td><strong>'+fmt(ttc)+'</strong></td><td style="color:#4488FF">'+fmt(mg)+'</td><td>'+Math.round(ttc/2000000*100)+'%</td>';b.appendChild(tr);});}
 
@@ -3818,17 +3834,28 @@ function annulerTicket(id){
   var t=txs.find(function(x){return x.id===id;});
   if(!t){toast('Ticket introuvable','e');return;}
   if(t.stat==='Annulé'){toast('Ce ticket est déjà annulé','i');return;}
-  if(!confirm('Annuler le ticket '+t.id+' ('+fmt(t.ttc)+') ?'))return;
-  t.stat='Annulé';
+  if(!confirm('Annuler le ticket '+t.id+' ('+fmt(t.ttc)+') ?\nLes articles seront remis en stock et le montant retiré des totaux.'))return;
+  var motif=(prompt('Motif de l\'annulation (obligatoire) :','')||'').trim();
+  if(!motif){toast('Annulation refusée : indiquez un motif','e');return;}
+  t.stat='Annulé';t.annuleMotif=motif;t.annulePar=(window.currentUser&&window.currentUser.nom)||'—';t.annuleLe=new Date().toISOString();
+  // Remise en stock (une seule fois par ticket)
+  if(!t.stkRemis){
+    (t.items||[]).forEach(function(it){
+      var a=arts.find(function(x){return it.id!=null?x.id===it.id:x.nom===it.nom;});
+      if(a&&stockGere(a))a.stk=(a.stk||0)+(it.qty||0);
+    });
+    t.stkRemis=true;window.artsUpdatedAt=Date.now();
+  }
+  try{renderStk();renderProds('');}catch(e){}
   renderRap();renderTkList();
-  if(window.fssSyncPush)window.fssSyncPush();
+  if(window.fssSyncPushImmediate)window.fssSyncPushImmediate();else if(window.fssSyncPush)window.fssSyncPush();
   toast('Ticket '+t.id+' annulé','s');
 }
 function renderLC(){
   var b=g('bLC');if(!b)return;b.innerHTML='';
   var fonds=getFondsOuverture(null);
   var s=fonds;
-  var lignes=[{d:'08:00',l:'Fonds ouverture',enc:fonds}].concat(txs.map(function(t){return{d:t.date,l:'Vente — '+t.id,enc:t.ttc};}))
+  var lignes=[{d:'08:00',l:'Fonds ouverture',enc:fonds}].concat(txsV().map(function(t){return{d:t.date,l:'Vente — '+t.id,enc:t.ttc};}))
     .concat(entrees.map(function(e){return{d:e.heure,l:'Entrée de caisse — '+e.motif,enc:e.mnt,typ:'Entrée'};}))
     .concat(prls.map(function(e){return{d:e.heure,l:'Sortie de caisse — '+e.motif,dec:e.mnt,typ:'Sortie'};}));
   lignes.forEach(function(l,i){
@@ -3838,7 +3865,7 @@ function renderLC(){
     b.appendChild(tr);
   });
 }
-function renderLR(){var b=g('bLR');if(!b)return;b.innerHTML='';var cu=0;txs.forEach(function(t){cu+=t.ttc;var tr=document.createElement('tr');tr.innerHTML='<td>'+t.date+'</td><td style="color:#CC0000"><strong>'+t.id+'</strong></td><td>'+fmt(t.ht)+'</td><td>'+fmt(t.tva)+'</td><td><strong>'+fmt(t.ttc)+'</strong></td><td>'+fmt(cu)+'</td>';b.appendChild(tr);});}
+function renderLR(){var b=g('bLR');if(!b)return;b.innerHTML='';var cu=0;txsV().forEach(function(t){cu+=t.ttc;var tr=document.createElement('tr');tr.innerHTML='<td>'+t.date+'</td><td style="color:#CC0000"><strong>'+t.id+'</strong></td><td>'+fmt(t.ht)+'</td><td>'+fmt(t.tva)+'</td><td><strong>'+fmt(t.ttc)+'</strong></td><td>'+fmt(cu)+'</td>';b.appendChild(tr);});}
 
 // CLOTURE
 function renderCloCaisseSelect(){
@@ -3883,7 +3910,7 @@ function cloValeurs(){
 function txsCloture(){
   var f=cloValeurs();
   var d1=f.du?new Date(f.du+'T00:00:00').getTime():0,d2=f.au?new Date(f.au+'T23:59:59').getTime():0;
-  return txs.filter(function(t){
+  return txsV().filter(function(t){
     if(f.caisse&&t.caisse!==f.caisse)return false;
     if(f.srv&&t.srv!==f.srv)return false;
     if(f.caissier&&t.caissier!==f.caissier)return false;
@@ -4133,9 +4160,9 @@ function afficherBilanCloture(){
   b.innerHTML='';
   var totalGlobal=0,totalTickets=0;
   var listeCaisses=caisses.slice().sort();
-  var sansCaisse=txs.filter(function(t){return !t.caisse;});
+  var sansCaisse=txsV().filter(function(t){return !t.caisse;});
   listeCaisses.forEach(function(c){
-    var tl=txs.filter(function(t){return t.caisse===c;});
+    var tl=txsV().filter(function(t){return t.caisse===c;});
     var ca=tl.reduce(function(s,t){return s+t.ttc;},0);
     totalGlobal+=ca;totalTickets+=tl.length;
     var tr=document.createElement('tr');
