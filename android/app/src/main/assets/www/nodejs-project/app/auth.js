@@ -16,6 +16,7 @@
     { key: 'params', label: '⚙️ Paramètres' },
     { key: 'reimpression', label: '🖨️ Réimpression tickets' },
     { key: 'annulation', label: '🗑️ Annulation tickets' },
+    { key: 'remise', label: '🏷️ Accorder une remise en caisse' },
     { key: 'retraitArticle', label: '➖ Retirer article (factures / commandes en attente)' },
     { key: 'suppressionAttente', label: '🗑️ Supprimer une commande en attente' }
   ];
@@ -110,23 +111,41 @@
     var nom = document.getElementById('authNom').value.trim();
     var mdp = document.getElementById('authMdp').value.trim();
     var err = document.getElementById('authErr');
-    if (!dataReady || !(window.users || []).length) {
+    var btn = document.getElementById('authLoginBtn');
+    if (!dataReady) {
       err.textContent = 'Connexion en cours, réessayez dans un instant...';
       return;
     }
-    var u = (window.users || []).find(function (x) {
-      return x.nom.toLowerCase() === nom.toLowerCase() && x.mdp === mdp;
+    if (!nom || !mdp) { err.textContent = 'Identifiant et mot de passe requis'; return; }
+    btn.disabled = true;
+    fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nom: nom, mdp: mdp })
+    }).then(function (r) {
+      return r.json().then(function (j) { return { st: r.status, j: j || {} }; });
+    }).then(function (x) {
+      if (!x.j.ok) {
+        btn.disabled = false;
+        err.textContent = x.st === 429 ? (x.j.error || 'Trop d\'essais, patientez un instant') : 'Identifiant ou mot de passe incorrect';
+        return;
+      }
+      window.FSS_TOKEN = x.j.token;
+      var terminer = function () {
+        var u = (window.users || []).find(function (y) { return y.id === x.j.user.id; }) || x.j.user;
+        err.textContent = '';
+        currentUser = u;
+        window.currentUser = u;
+        var ov = document.getElementById('authOverlay');
+        if (ov) ov.remove();
+        if (u.doitChangerMdp) showChangePassword(u, true); else enterApp();
+      };
+      var charge = window.fssApresConnexion ? window.fssApresConnexion() : Promise.resolve();
+      charge.then(terminer, function () { btn.disabled = false; err.textContent = 'Chargement des données impossible, réessayez'; });
+    }).catch(function () {
+      btn.disabled = false;
+      err.textContent = 'Serveur injoignable, réessayez';
     });
-    if (!u) { err.textContent = 'Identifiant ou mot de passe incorrect'; return; }
-    err.textContent = '';
-    currentUser = u;
-    window.currentUser = u;
-    document.getElementById('authOverlay').remove();
-    if (u.doitChangerMdp) {
-      showChangePassword(u, true);
-    } else {
-      enterApp();
-    }
   }
 
   // ---------- Changement de mot de passe ----------
@@ -155,6 +174,8 @@
       u.mdp = p1;
       u.doitChangerMdp = false;
       window.usersRev = (window.usersRev || 0) + 1; if (window.fssSyncPush) window.fssSyncPush();
+      // Le mot de passe en clair ne reste pas en mémoire : le serveur le transforme en empreinte.
+      setTimeout(function () { try { delete u.mdp; } catch (e) {} }, 2000);
       ov.remove();
       if (forced) enterApp();
       else safeToast('Mot de passe modifié', 's');
@@ -178,6 +199,10 @@
   // Permission distincte pour l'annulation de tickets (séparée de la réimpression).
   window.hasAnnulationPermission = function () {
     return hasAccess(currentUser, 'annulation');
+  };
+
+  window.hasRemisePermission = function () {
+    return hasAccess(currentUser, 'remise');
   };
 
   window.hasRetraitArticlePermission = function () {
@@ -212,6 +237,13 @@
       var m = (btn.getAttribute('onclick') || '').match(/goPage\('([a-zA-Z]+)'/);
       if (!m) return;
       btn.style.display = hasAccess(currentUser, m[1]) ? '' : 'none';
+    });
+    var peutRemise = hasAccess(currentUser, 'remise');
+    ['remF', 'remP'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !peutRemise;
+      if (!peutRemise) { el.value = ''; el.title = 'Remise non autorisée pour ce compte'; }
     });
     if (!window._goPageWrapped && typeof window.goPage === 'function') {
       var origGoPage = window.goPage;

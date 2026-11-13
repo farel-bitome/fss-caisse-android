@@ -4,6 +4,93 @@ const path = require('path');
 const fs = require('fs');
 const zlib = require('zlib');
 const { Server } = require('socket.io');
+const crypto = require('crypto');
+
+// ---------------------------------------------------------------------------
+// Sécurité : mots de passe hachés (scrypt + sel), jamais renvoyés aux postes.
+// ---------------------------------------------------------------------------
+function hacherMdp(mdp) {
+  const sel = crypto.randomBytes(16).toString('hex');
+  return 'scrypt$' + sel + '$' + crypto.scryptSync(String(mdp), sel, 32).toString('hex');
+}
+function egalConstant(a, b) {
+  const A = Buffer.from(String(a)), B = Buffer.from(String(b));
+  return A.length === B.length && crypto.timingSafeEqual(A, B);
+}
+function verifierHash(mdp, stocke) {
+  try {
+    const p = String(stocke).split('$');
+    if (p[0] !== 'scrypt' || p.length !== 3) return false;
+    const h = crypto.scryptSync(String(mdp), p[1], 32);
+    const attendu = Buffer.from(p[2], 'hex');
+    return attendu.length === h.length && crypto.timingSafeEqual(h, attendu);
+  } catch (e) { return false; }
+}
+function mdpCorrect(u, mdp) {
+  if (!u || mdp === undefined || mdp === null || mdp === '') return false;
+  if (u.mdpHash) return verifierHash(mdp, u.mdpHash);
+  if (typeof u.mdp === 'string' && u.mdp !== '') return egalConstant(u.mdp, mdp);
+  return false;
+}
+// Anciennes bases : mots de passe en clair -> hachés une fois pour toutes.
+function migrerMdp(st) {
+  (st && Array.isArray(st.users) ? st.users : []).forEach((u) => {
+    if (!u) return;
+    if (typeof u.mdp === 'string' && u.mdp !== '' && !u.mdpHash) u.mdpHash = hacherMdp(u.mdp);
+    delete u.mdp;
+  });
+}
+function etatPublic(st) {
+  const c = Object.assign({}, st);
+  c.users = (st.users || []).map((u) => { const x = Object.assign({}, u); delete x.mdp; delete x.mdpHash; return x; });
+  delete c.razCles;
+  return c;
+}
+function etatAnonyme(st) {
+  return { _public: true, logo: st.logo || null, etab: st.etab || null };
+}
+
+// ---------------------------------------------------------------------------
+// Noms saisis (articles, clients, tables...) : on neutralise < > " à l'enregistrement,
+// pour qu'aucun nom ne puisse injecter de code dans les écrans ou les impressions.
+// ---------------------------------------------------------------------------
+const CLES_NON_ASSAINIES = { logo: 1, printBatches: 1, mdp: 1, mdpHash: 1 };
+function assainir(v) {
+  if (typeof v === 'string') return v.replace(/</g, '‹').replace(/>/g, '›').replace(/"/g, '″');
+  if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = assainir(v[i]); return v; }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) { if (!CLES_NON_ASSAINIES[k]) v[k] = assainir(v[k]); }
+    return v;
+  }
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// Tickets : le serveur est l'autorité (stock, numéros, annulations).
+// ---------------------------------------------------------------------------
+function stockGereSrv(a, catActive) {
+  if (!a || a.alerte === false) return false;
+  if (catActive && catActive[a.cat] === false && !a.stkRemis) return false;
+  return true;
+}
+function cleDoublon(t) { return [t.ts, t.ttc, t.caissier, t.tbl].join('|'); }
+function appliquerStockTicket(t, arts, catActive) {
+  const parId = {};
+  arts.forEach((a) => { parId[a.id] = a; });
+  const ajuster = (sens) => {
+    (t.items || []).forEach((it) => {
+      const a = it && it.id != null ? parId[it.id] : null;
+      if (a && stockGereSrv(a, catActive)) a.stk = (Number(a.stk) || 0) + sens * (Number(it.qty) || 0);
+    });
+  };
+  if (!t._stkSrv) {
+    if (t.stat !== 'Annulé') ajuster(-1); else t._stkRendu = true;
+    t._stkSrv = true;
+  } else if (t.stat === 'Annulé' && !t._stkRendu) {
+    ajuster(+1);
+    t._stkRendu = true;
+  }
+}
 
 // Filet de sécurité global : une erreur imprévue n'importe où (surtout
 // probable quand plusieurs postes sont connectés en même temps et envoient
@@ -158,6 +245,14 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     }
 
     let state = loadState();
+    migrerMdp(state);
+    assainir(state);
+    // Tickets déjà présents : leur stock est considéré comme déjà appliqué (jamais retraité).
+    (Array.isArray(state.txs) ? state.txs : []).forEach((t) => {
+      if (!t) return;
+      t._stkSrv = true;
+      if (t.stat === 'Annulé') t._stkRendu = true;
+    });
 
     const expressApp = express();
     const server = http.createServer(expressApp);
@@ -167,29 +262,98 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     let diffusionTimer = null;
     function diffuserEtat() {
       if (diffusionTimer) return;
-      diffusionTimer = setTimeout(() => { diffusionTimer = null; try { io.emit('state:changed', state); } catch (e) {} }, 150);
+      diffusionTimer = setTimeout(() => { diffusionTimer = null; try { io.to('auth').emit('state:changed', etatPublic(state)); } catch (e) {} }, 150);
     }
 
-    expressApp.use(function (req, res, next) {
+    // Plus de CORS ouvert à tous : une page web quelconque ne peut plus lire les données.
+    // Seul /api/ping (aucune donnée) reste lisible de l'extérieur (test d'adresse du serveur).
+    expressApp.get('/api/ping', function (req, res) {
       res.header('Access-Control-Allow-Origin', '*');
-      res.header('Access-Control-Allow-Methods', 'GET,POST');
-      res.header('Access-Control-Allow-Headers', 'Content-Type');
-      next();
+      res.json({ ok: true });
     });
     expressApp.use(express.json({ limit: '10mb' }));
+    // ---- Sessions : un jeton est délivré à la connexion (mot de passe vérifié par le serveur) ----
+    const sessions = new Map();
+    const DUREE_SESSION = 12 * 3600 * 1000;
+    function estLocal(req) {
+      const a = (req.socket && req.socket.remoteAddress) || '';
+      return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+    }
+    function sessionDe(req) {
+      const t = req.headers['x-fss-token'];
+      const s = t && sessions.get(String(t));
+      if (!s) return null;
+      if (Date.now() > s.exp) { sessions.delete(String(t)); return null; }
+      s.exp = Date.now() + DUREE_SESSION;
+      return s;
+    }
+    function acteurDe(req) {
+      const s = sessionDe(req);
+      return s ? ((state.users || []).find((u) => u && u.id === s.uid) || null) : null;
+    }
+    // Le poste Serveur lui-même (127.0.0.1) est de confiance ; tout autre appareil doit être connecté.
+    function requeteAutorisee(req) { return estLocal(req) || !!sessionDe(req); }
+    function estAdminReq(req) {
+      const u = acteurDe(req);
+      if (u) return !!(u.super || u.full);
+      return estLocal(req) && !req.headers['x-fss-token'];
+    }
+    const essaisLogin = {};
+    function limiteur(table, ip, max, blocageMs) {
+      const e = table[ip] || { n: 0, bloque: 0 };
+      table[ip] = e;
+      if (Date.now() < e.bloque) return { bloque: true, e };
+      return { bloque: false, e, echec() { e.n++; if (e.n >= max) { e.n = 0; e.bloque = Date.now() + blocageMs; } }, ok() { delete table[ip]; } };
+    }
+    expressApp.post('/api/login', (req, res) => {
+      const ip = req.ip || (req.socket && req.socket.remoteAddress) || '?';
+      const l = limiteur(essaisLogin, ip, 8, 30000);
+      if (l.bloque) return res.status(429).json({ ok: false, error: 'Trop d\'essais, patientez 30 secondes' });
+      const nom = String((req.body && req.body.nom) || '').trim().toLowerCase();
+      const mdp = String((req.body && req.body.mdp) || '');
+      const u = (state.users || []).filter((x) => x && String(x.nom).toLowerCase() === nom).find((x) => mdpCorrect(x, mdp));
+      if (!u) { l.echec(); return res.json({ ok: false }); }
+      l.ok();
+      const now = Date.now();
+      sessions.forEach((v, k) => { if (now > v.exp) sessions.delete(k); });
+      const token = crypto.randomBytes(24).toString('hex');
+      sessions.set(token, { uid: u.id, exp: now + DUREE_SESSION });
+      const pub = Object.assign({}, u); delete pub.mdp; delete pub.mdpHash;
+      ecrireJournal('Connexion : ' + u.nom + ' (' + ip + ')');
+      res.json({ ok: true, token, user: pub });
+    });
+    // Confirmation du mot de passe de l'utilisateur connecté (actions sensibles : RAZ, suppression du catalogue...).
+    const essaisConfirm = {};
+    expressApp.post('/api/verif-mdp', (req, res) => {
+      const u = acteurDe(req);
+      if (!u) return res.status(401).json({ ok: false });
+      const l = limiteur(essaisConfirm, String(u.id), 6, 30000);
+      if (l.bloque) return res.status(429).json({ ok: false });
+      const ok = mdpCorrect(u, String((req.body && req.body.mdp) || ''));
+      if (ok) l.ok(); else l.echec();
+      res.json({ ok });
+    });
     // Vérification d'un compte admin / super-admin pour l'accès technicien des postes clients (rien n'est mémorisé côté client).
     const essaisVerif = {};
     expressApp.post('/api/verif-admin', (req, res) => {
       const ip = req.ip || (req.socket && req.socket.remoteAddress) || '?';
-      const e = essaisVerif[ip] || { n: 0, bloque: 0 };
-      if (Date.now() < e.bloque) return res.status(429).json({ ok: false });
+      const l = limiteur(essaisVerif, ip, 5, 30000);
+      if (l.bloque) return res.status(429).json({ ok: false });
       const nom = String((req.body && req.body.nom) || '').trim().toLowerCase();
       const mdp = String((req.body && req.body.mdp) || '');
-      const ok = mdp !== '' && (state.users || []).some(u => u && (u.super || u.full) && u.mdp === mdp && (!nom || String(u.nom).toLowerCase() === nom));
-      if (ok) { delete essaisVerif[ip]; return res.json({ ok: true }); }
-      e.n++; if (e.n >= 5) { e.n = 0; e.bloque = Date.now() + 30000; }
-      essaisVerif[ip] = e;
+      const ok = mdp !== '' && (state.users || []).some(u => u && (u.super || u.full) && mdpCorrect(u, mdp) && (!nom || String(u.nom).toLowerCase() === nom));
+      if (ok) { l.ok(); return res.json({ ok: true }); }
+      l.echec();
       res.json({ ok: false });
+    });
+    // Tout le reste de /api exige une session valide (sauf poste Serveur local).
+    expressApp.use('/api', function (req, res, next) {
+      if (req.method === 'GET' && req.path === '/state') return next(); // vue publique si non connecté
+      if (requeteAutorisee(req)) {
+        if (req.method === 'POST' && req.body && !/^\/(printbatches|airtel|pvit)/.test(req.path)) assainir(req.body);
+        return next();
+      }
+      res.status(401).json({ ok: false, error: 'non autorisé' });
     });
     // Compression gzip des réponses (surtout utile pour /api/state, qui peut
     // devenir volumineux avec beaucoup d'articles/tables/historique) — réduit
@@ -216,7 +380,25 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     expressApp.use(express.static(appStaticDir));
 
     expressApp.get('/api/state', (req, res) => {
-      res.json(state);
+      if (!requeteAutorisee(req)) return res.json(etatAnonyme(state));
+      res.json(etatPublic(state));
+    });
+
+    // Remise à zéro de la caisse : route dédiée (les tickets ne sont jamais supprimés par un envoi d'état).
+    expressApp.post('/api/raz', (req, res) => {
+      try {
+        if (!estAdminReq(req)) return res.status(403).json({ ok: false, error: 'réservé aux administrateurs' });
+        const caisse = String((req.body && req.body.caisse) || '');
+        const liste = Array.isArray(state.txs) ? state.txs : [];
+        const retires = liste.filter((t) => !caisse || t.caisse === caisse);
+        state.razCles = (state.razCles || []).concat(retires.map(cleDoublon)).slice(-20000);
+        state.txs = liste.filter((t) => caisse && t.caisse !== caisse);
+        if (!caisse) { state.prls = []; state.entrees = []; }
+        saveState(state);
+        diffuserEtat();
+        ecrireJournal('RAZ caisse ' + (caisse || '(toutes)') + ' — ' + retires.length + ' ticket(s) retiré(s)');
+        res.json({ ok: true, retires: retires.length });
+      } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
     });
 
     // ---- Commandes en attente : gérées EXCLUSIVEMENT via des actions ciblées ----
@@ -365,7 +547,7 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     // les postes ; seul le poste émetteur du bon l'affiche.
     expressApp.post('/api/printerrors', (req, res) => {
       try {
-        io.emit('print:error', req.body || {});
+        io.to('auth').emit('print:error', req.body || {});
         ecrireJournal('Erreur impression : ' + JSON.stringify(req.body || {}).slice(0, 300));
         res.json({ ok: true });
       } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -490,6 +672,91 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
           nouvelEtat.usersRev = revServeur;
           ecrireJournal('Comptes : liste reçue plus ancienne (rév. ' + revRecue + ' < ' + revServeur + ') — ignorée, version du serveur conservée');
         }
+        // ---- Comptes : mots de passe hachés, droits protégés ----
+        const acteur = acteurDe(req);
+        const admin = estAdminReq(req);
+        const anciens = Array.isArray(state.users) ? state.users : [];
+        if (admin) {
+          (Array.isArray(nouvelEtat.users) ? nouvelEtat.users : []).forEach((u) => {
+            if (!u) return;
+            const ancien = anciens.find((x) => x && x.id === u.id);
+            if (typeof u.mdp === 'string' && u.mdp !== '' && !(ancien && ancien.super)) u.mdpHash = hacherMdp(u.mdp);
+            else u.mdpHash = ancien ? ancien.mdpHash : undefined;
+            delete u.mdp;
+            if (u.mdpHash === undefined) delete u.mdpHash;
+          });
+        } else {
+          // Un compte non administrateur ne peut ni créer de compte ni changer de droits : seul son propre mot de passe.
+          const recu = acteur && (Array.isArray(nouvelEtat.users) ? nouvelEtat.users : []).find((x) => x && x.id === acteur.id);
+          nouvelEtat.users = anciens;
+          nouvelEtat.nextUserId = state.nextUserId;
+          nouvelEtat.usersRev = state.usersRev;
+          if (acteur && !acteur.super && recu && typeof recu.mdp === 'string' && recu.mdp.length >= 3) {
+            const cible = anciens.find((x) => x && x.id === acteur.id);
+            if (cible) { cible.mdpHash = hacherMdp(recu.mdp); cible.doitChangerMdp = false; }
+          }
+        }
+        // ---- Stock : le serveur est l'autorité (une vente d'un autre poste n'est jamais écrasée) ----
+        const artsServeur = {};
+        (Array.isArray(state.arts) ? state.arts : []).forEach((a) => { if (a) artsServeur[a.id] = a; });
+        nouvelEtat.arts = nouvelEtat.arts.map((a) => {
+          const c = Object.assign({}, a);
+          const sv = artsServeur[a.id];
+          if (sv && typeof sv.stk === 'number') c.stk = sv.stk;
+          return c;
+        });
+        // ---- Tickets : fusion (jamais perdus, jamais doublonnés), numéros uniques, stock appliqué une seule fois ----
+        const parId = new Map();
+        const parCle = new Map();
+        (Array.isArray(state.txs) ? state.txs : []).forEach((t) => { if (t && t.id != null) { parId.set(t.id, t); parCle.set(cleDoublon(t), t); } });
+        const cles = new Set(state.razCles || []);
+        const utilises = new Set(parId.keys());
+        let compteur = Math.max(Number(state.nextTk) || 1, Number(nouvelEtat.nextTk) || 1);
+        parId.forEach((t, id) => { const n = parseInt(String(id).replace(/\D/g, ''), 10); if (n >= compteur) compteur = n + 1; });
+        const vus = new Set();
+        const fusion = [];
+        (nouvelEtat.txs || []).forEach((t) => {
+          if (!t || t.id == null) return;
+          const sv = parId.get(t.id);
+          if (sv && (!t.ts || sv.ts === t.ts)) {
+            if (vus.has(sv)) return;
+            vus.add(sv);
+            const m = Object.assign({}, t);
+            delete m._stkSrv; delete m._stkRendu;
+            if (sv._stkSrv) m._stkSrv = true;
+            if (sv._stkRendu) m._stkRendu = true;
+            if (sv.stat === 'Annulé') ['stat', 'annuleMotif', 'annulePar', 'annuleLe', 'stkRemis'].forEach((k) => { if (sv[k] !== undefined) m[k] = sv[k]; });
+            if (sv.creditPaye === true && m.creditPaye !== true) ['creditPaye', 'pay', 'recu', 'rendu', 'creditRegleLe', 'creditRegleePar'].forEach((k) => { if (sv[k] !== undefined) m[k] = sv[k]; });
+            fusion.push(m);
+            return;
+          }
+          const k = cleDoublon(t);
+          if (parCle.has(k)) { const sv2 = parCle.get(k); if (!vus.has(sv2)) { vus.add(sv2); fusion.push(sv2); } return; }
+          if (cles.has(k)) return; // ticket effacé par une remise à zéro : un poste en retard ne le ressuscite pas
+          const n = Object.assign({}, t);
+          delete n._stkSrv; delete n._stkRendu;
+          if (utilises.has(n.id)) {
+            while (utilises.has('TK-' + ('000' + compteur).slice(-4))) compteur++;
+            ecrireJournal('Numéro de ticket en double (' + n.id + ') — renuméroté TK-' + ('000' + compteur).slice(-4));
+            n.id = 'TK-' + ('000' + compteur).slice(-4);
+          }
+          utilises.add(n.id);
+          parCle.set(k, n);
+          fusion.push(n);
+        });
+        (Array.isArray(state.txs) ? state.txs : []).forEach((t) => { if (t && !vus.has(t)) fusion.push(t); });
+        fusion.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        fusion.forEach((t) => {
+          appliquerStockTicket(t, nouvelEtat.arts, nouvelEtat.categoryAlerteActive);
+          const n = parseInt(String(t.id).replace(/\D/g, ''), 10);
+          if (n >= compteur) compteur = n + 1;
+        });
+        nouvelEtat.txs = fusion;
+        nouvelEtat.nextTk = compteur;
+        nouvelEtat.attenteSeq = Math.max(Number(state.attenteSeq) || 1, Number(nouvelEtat.attenteSeq) || 1);
+        nouvelEtat.razLog = undefined; delete nouvelEtat.razLog;
+        nouvelEtat.razCles = state.razCles || [];
+        assainir(nouvelEtat);
         state = nouvelEtat;
         saveState(state);
         diffuserEtat();
@@ -651,9 +918,19 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
       res.status(r.status).json(r.body);
     });
 
+    io.use((socket, next) => {
+      const a = (socket.handshake && socket.handshake.address) || '';
+      const local = a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+      const t = socket.handshake && socket.handshake.auth && socket.handshake.auth.token;
+      const sess = t && sessions.get(String(t));
+      socket.data.autorise = local || !!(sess && Date.now() <= sess.exp);
+      next();
+    });
     io.on('connection', (socket) => {
       try {
-        socket.emit('state:changed', state);
+        if (!socket.data.autorise) return;
+        socket.join('auth');
+        socket.emit('state:changed', etatPublic(state));
       } catch (e) {
         console.error('[FSS-CAISSE] Erreur lors de la connexion d\'un poste :', e);
       }

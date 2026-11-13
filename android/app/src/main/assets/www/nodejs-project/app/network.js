@@ -2,7 +2,7 @@
 // Ce script connecte l'application au serveur central FSS-CAISSE
 // et synchronise en temps réel les données entre tous les postes.
 (function () {
-  var socket = (typeof io === 'function') ? io() : null;
+  var socket = (typeof io === 'function') ? io({ auth: function (cb) { cb({ token: window.FSS_TOKEN || '' }); } }) : null;
   var API = '/api/state';
   var applying = false;
   // Empêche tout envoi vers le serveur (syncPush) tant que ce poste n'a pas
@@ -32,7 +32,8 @@
   window.pointages = window.pointages || [];
   window.paieEntries = window.paieEntries || [];
 
-  var cmdEnVol = {}, retraitsEnVol = {};
+  var cmdEnVol = {}, retraitsEnVol = {}, txEnVol = {};
+  window.fssTxEnVol = txEnVol;
   function fullState() {
     return {
       arts: arts, clis: clis, fours: fours, cmds: cmds, txs: txs, mouv: mouv,
@@ -56,6 +57,13 @@
 
   function applyState(s) {
     if (!s) return;
+    // Vue publique (avant connexion sur un appareil distant) : logo et nom seulement, aucune donnée de caisse.
+    if (s._public) {
+      logoData = s.logo || null;
+      etabInfo = s.etab || etabInfo;
+      document.dispatchEvent(new Event('fss:ready'));
+      return;
+    }
     applying = true;
     initialStateLoaded = true;
     arts = s.arts || [];
@@ -63,6 +71,11 @@
     fours = s.fours || [];
     cmds = s.cmds || [];
     txs = s.txs || [];
+    // Ventes de ce poste pas encore confirmées par le serveur : jamais perdues par une diffusion en retard.
+    Object.keys(txEnVol).forEach(function (id) {
+      var t = txEnVol[id];
+      if (!txs.some(function (x) { return x.id === id || (x.ts === t.ts && x.ttc === t.ttc && x.caissier === t.caissier); })) txs.unshift(t);
+    });
     // L'impression automatique d'un "bon de commande" à chaque nouvelle vente a
     // été retirée : c'était la cause exacte du bon de commande qui sortait juste
     // avant le ticket de caisse au moment de payer. Seul le ticket de caisse
@@ -210,11 +223,12 @@
     if (!initialStateLoaded) return; // ne pas écraser le serveur avec des données locales pas encore synchronisées
     clearTimeout(pushTimer);
     pushTimer = setTimeout(function () {
+      var envoyes = Object.keys(txEnVol);
       fetch(API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(fullState())
-      }).catch(function () {
+      }).then(function (r) { if (r && r.ok) envoyes.forEach(function (id) { delete txEnVol[id]; }); }).catch(function () {
         safe(function () { toast('⚠️ Synchronisation impossible — vérifiez le serveur', 'e'); });
       });
     }, 150);
@@ -228,11 +242,12 @@
     if (applying) return;
     if (!initialStateLoaded) return;
     clearTimeout(pushTimer);
+    var envoyes = Object.keys(txEnVol);
     return fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(fullState())
-    }).catch(function () {
+    }).then(function (r) { if (r && r.ok) envoyes.forEach(function (id) { delete txEnVol[id]; }); return r; }).catch(function () {
       safe(function () { toast('⚠️ Synchronisation impossible — vérifiez le serveur', 'e'); });
     });
   }
@@ -401,6 +416,13 @@
       confirmer();
     });
   }
+  // Nouvelle tentative automatique tant qu'une vente n'est pas confirmée par le serveur.
+  setInterval(function () { if (Object.keys(txEnVol).length) syncPush(); }, 5000);
+  // Après connexion (appareil distant) : le jeton est actif, on recharge les vraies données et on reconnecte le temps réel.
+  window.fssApresConnexion = function () {
+    try { if (socket) { socket.disconnect(); socket.connect(); } } catch (e) {}
+    return fetch(API).then(function (r) { return r.json(); }).then(applyState);
+  };
   window.fssFullState = fullState;
   window.fssApplyState = applyState;
 
@@ -428,9 +450,14 @@
     if (typeof orig !== 'function') return;
     window[name] = function () {
       var estArticle = FONCTIONS_ARTICLES.indexOf(name) !== -1;
+      var ticketAvant = (name === 'valPay' && window.txs && window.txs[0]) || null;
       var avant = null;
       if (estArticle) { avant = {}; (window.arts || arts || []).forEach(function (x) { avant[x.id] = JSON.stringify(x); }); }
       var r = orig.apply(this, arguments);
+      if (name === 'valPay') {
+        var nouveau = window.txs && window.txs[0];
+        if (nouveau && nouveau !== ticketAvant && nouveau.id) txEnVol[nouveau.id] = nouveau;
+      }
       if (estArticle) {
         window.artsUpdatedAt = Date.now();
         // Envoi IMMÉDIAT au serveur des seuls articles ajoutés / modifiés / supprimés (fusion côté

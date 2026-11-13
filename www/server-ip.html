@@ -184,7 +184,7 @@
     err.className = 'err';
     err.textContent = '⏳ Test en cours...';
     document.getElementById('btnTest').disabled = true;
-    var url = 'http://' + v.ip + ':' + v.port + '/api/state';
+    var url = 'http://' + v.ip + ':' + v.port + '/api/ping';
     var timeout = new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout')); }, 3000); });
     Promise.race([fetch(url), timeout]).then(function (res) {
       document.getElementById('btnTest').disabled = false;

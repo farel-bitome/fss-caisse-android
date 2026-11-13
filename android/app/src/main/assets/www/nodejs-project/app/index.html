@@ -1256,7 +1256,7 @@ ART-001,Regab,Bière,Bouteille,2500,1500,50,10,🍺"></textarea>
 </div></div>
 
 <script>
-window.FSS_VERSION='1.7.2';
+window.FSS_VERSION='1.10.0';
 var arts=[];
 var clis=[];
 var fours=[];
@@ -1558,7 +1558,7 @@ function chgQ(i,d){
 function delI(i){if(!(typeof hasRetraitArticlePermission==='function'&&hasRetraitArticlePermission())){toast('Vous n\'avez pas le droit de retirer un article','e');return;}if(!confirm('Retirer cet article du ticket ?'))return;tkt.splice(i,1);renderTkt();updTotal();}
 function sousTotal(){return tkt.reduce(function(s,it){return s+Math.round(it.pv*it.qty);},0);}
 // Remise toujours entière et comprise entre 0 et le sous-total (une remise négative AUGMENTAIT le total).
-function getRemise(sub){var r=Math.round(parseFloat(g('remF').value)||0);if(r<0)r=0;if(r>sub)r=sub;return r;}
+function getRemise(sub){if(typeof hasRemisePermission==='function'&&window.currentUser&&!hasRemisePermission())return 0;var r=Math.round(parseFloat(g('remF').value)||0);if(r<0)r=0;if(r>sub)r=sub;return r;}
 function applyPct(){
   var sub=sousTotal();
   var pct=parseFloat(g('remP').value)||0;if(pct<0)pct=0;if(pct>100)pct=100;
@@ -2699,7 +2699,7 @@ function numIn(k){
   g('payMon').style.color=m>=0?'#4488FF':'#FF4444';
 }
 function valPay(){
-  var tot=getTotal();
+  var tot=getTotal();var remiseVal=getRemise(sousTotal());
   if(payMode==='esp'&&recAmt<tot){toast('Montant insuffisant','e');return;}
   var creditNom='';
   if(payMode==='cred'){creditNom=((g('creditNom')&&g('creditNom').value)||'').trim();if(!creditNom){toast('Indiquez le nom de la personne','e');if(g('creditNom'))g('creditNom').focus();return;}}
@@ -2719,7 +2719,7 @@ function valPay(){
   var rendu=payMode==='esp'?Math.max(0,recAmt-tot):0;
   var caissier=(window.currentUser&&window.currentUser.nom)?window.currentUser.nom:'—';
   var caisseNom=g('selCaisse')?g('selCaisse').value:'';
-  txs.unshift({id:'TK-'+('000'+nextTk).slice(-4),date:dd+'/'+mm+' '+hh+':'+mi,ts:now.getTime(),tbl:tableNomAffiche(),srv:g('selSrv').value,caissier:caissier,caisse:caisseNom,arts:nb,items:itemsSnapshot,ht:ht,tva:tot-ht,ttc:tot,pay:payMode==='esp'?'Espèces':(payMode==='airtel'?'Airtel Money':(payMode==='momo'?libelleMomo(paiementMomo):'Crédit')),creditNom:payMode==='cred'?creditNom:undefined,creditEmploye:payMode==='cred'?!!(g('creditEmploye')&&g('creditEmploye').checked):undefined,creditPaye:payMode==='cred'?false:undefined,recu:recu,rendu:rendu,stat:'Validé',momo:payMode==='momo'?detailsMomo(paiementMomo):undefined});
+  txs.unshift({id:'TK-'+('000'+nextTk).slice(-4),date:dd+'/'+mm+' '+hh+':'+mi,ts:now.getTime(),tbl:tableNomAffiche(),srv:g('selSrv').value,caissier:caissier,caisse:caisseNom,arts:nb,items:itemsSnapshot,ht:ht,tva:tot-ht,remise:remiseVal,ttc:tot,pay:payMode==='esp'?'Espèces':(payMode==='airtel'?'Airtel Money':(payMode==='momo'?libelleMomo(paiementMomo):'Crédit')),creditNom:payMode==='cred'?creditNom:undefined,creditEmploye:payMode==='cred'?!!(g('creditEmploye')&&g('creditEmploye').checked):undefined,creditPaye:payMode==='cred'?false:undefined,recu:recu,rendu:rendu,stat:'Validé',momo:payMode==='momo'?detailsMomo(paiementMomo):undefined});
   paiementMomo=null;
   nextTk++;g('tkNum').textContent='TK-#'+('000'+nextTk).slice(-4);
   // Commande reprise depuis « En attente » : elle est maintenant PAYÉE, c'est le seul moment (avec
@@ -4184,11 +4184,13 @@ function razCaisse(){
   var f=g('cloCaisse')?g('cloCaisse').value:'';
   var msg=(f?'Remettre uniquement la caisse "<strong>'+f+'</strong>" à zéro ?':'Remettre <strong>TOUTES les caisses</strong> à zéro ?')+' C\'est irréversible.<br><br>Saisissez votre mot de passe administrateur pour confirmer :';
   openAdminPwdConfirm(msg,'🔄 Confirmer la RAZ',function(){
-    if(f){txs=txs.filter(function(t){return t.caisse!==f;});}
-    else{txs=[];prls=[];entrees=[];}
-    renderPrls();initCloture();renderTkList();renderRap();
-    if(window.fssSyncPush)window.fssSyncPush();
-    toast('Caisse remise à zéro','s');
+    fetch('/api/raz',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caisse:f})}).then(function(r){return r.json();}).then(function(j){
+      if(!j||!j.ok){toast('Remise à zéro refusée par le serveur','e');return;}
+      if(f){txs=txs.filter(function(t){return t.caisse!==f;});}
+      else{txs=[];prls=[];entrees=[];}
+      renderPrls();initCloture();renderTkList();renderRap();
+      toast('Caisse remise à zéro','s');
+    }).catch(function(){toast('Serveur injoignable : remise à zéro impossible','e');});
   });
 }
 function calcCpt(){var tot=(parseInt(g('b10').value)||0)*10000+(parseInt(g('b5').value)||0)*5000+(parseInt(g('b2').value)||0)*2000+(parseInt(g('b1').value)||0)*1000+(parseInt(g('p500').value)||0)*500+(parseInt(g('p250').value)||0)*250;var f=g('cloCaisse')?g('cloCaisse').value:'';var fonds=getFondsOuverture(f);var j=especesDe(txsCloture())+fonds-prls.reduce(function(s,p){return s+p.mnt;},0);var ec=tot-j;g('cptTot').textContent=fmt(tot);g('cptEcart').textContent=(ec>=0?'+':'')+fmt(ec);g('cptEcart').style.color=ec===0?'#4488FF':ec<0?'#FF4444':'#CC0000';}
@@ -5105,10 +5107,12 @@ function confirmAdminAction(){
   if(!u||!(u.super||u.full)){toast('Action réservée aux administrateurs','e');return;}
   var pwd=g('stockZeroPwd').value;
   if(!pwd){g('stockZeroErr').textContent='Mot de passe requis';return;}
-  if(pwd!==u.mdp){g('stockZeroErr').textContent='Mot de passe incorrect';return;}
-  closeM('ovStockZero');
-  var action=pendingAdminAction;pendingAdminAction=null;
-  if(action)action();
+  fetch('/api/verif-mdp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mdp:pwd})}).then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.ok){g('stockZeroErr').textContent='Mot de passe incorrect';return;}
+    closeM('ovStockZero');
+    var action=pendingAdminAction;pendingAdminAction=null;
+    if(action)action();
+  }).catch(function(){g('stockZeroErr').textContent='Serveur injoignable';});
 }
 function initStockArticlesZero(){
   openAdminPwdConfirm('Cette action va <strong>supprimer TOUS les articles ET toutes les catégories</strong> — le catalogue entier repart de zéro. C\'est irréversible.<br><br>Pour confirmer, saisissez votre mot de passe administrateur :','🗑️ Tout supprimer',function(){
@@ -5586,6 +5590,7 @@ document.addEventListener('DOMContentLoaded',function(){
   document.querySelectorAll('input[type=date]').forEach(function(e){if(!e.value&&!e.hasAttribute('data-vide'))e.value=td;});
 });
 </script>
+<script src="fss-session.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <style id="fssLoginBg">
 /* Écran de connexion : visuel FALL SERVICES & SOLUTIONS ENTIER en filigrane 3D animé + projecteurs du bas vers le haut */
