@@ -1256,7 +1256,7 @@ ART-001,Regab,Bière,Bouteille,2500,1500,50,10,🍺"></textarea>
 </div></div>
 
 <script>
-window.FSS_VERSION='1.10.0';
+window.FSS_VERSION='1.10.1';
 var arts=[];
 var clis=[];
 var fours=[];
@@ -1392,7 +1392,7 @@ function imprimerFactureCredit(id){
 }
 function encaisserCredit(id){
   var t=txs.find(function(x){return x.id===id;});if(!t||t.creditPaye)return;
-  if(!confirm('Encaisser '+fmt(t.ttc)+' de '+t.creditNom+' en espèces ?'))return;
+  if(!fssAsk('Encaisser '+fmt(t.ttc)+' de '+t.creditNom+' en espèces ?',function(){encaisserCredit(id);}))return;
   var n=new Date();
   t.creditPaye=true;t.pay='Espèces';t.recu=t.ttc;t.rendu=0;
   t.creditRegleLe=('0'+n.getDate()).slice(-2)+'/'+('0'+(n.getMonth()+1)).slice(-2)+' '+('0'+n.getHours()).slice(-2)+':'+('0'+n.getMinutes()).slice(-2);
@@ -1555,7 +1555,7 @@ function chgQ(i,d){
   if(d>0){var aa=arts.find(function(x){return x.id===tkt[i].id;});if(aa&&stockGere(aa)&&tkt[i].qty+d>aa.stk){toast('Stock insuffisant : '+aa.nom+' (reste '+aa.stk+')','e');return;}}
   tkt[i].qty+=d;if(tkt[i].qty<=0)tkt.splice(i,1);renderTkt();updTotal();
 }
-function delI(i){if(!(typeof hasRetraitArticlePermission==='function'&&hasRetraitArticlePermission())){toast('Vous n\'avez pas le droit de retirer un article','e');return;}if(!confirm('Retirer cet article du ticket ?'))return;tkt.splice(i,1);renderTkt();updTotal();}
+function delI(i){if(!(typeof hasRetraitArticlePermission==='function'&&hasRetraitArticlePermission())){toast('Vous n\'avez pas le droit de retirer un article','e');return;}if(!fssAsk('Retirer cet article du ticket ?',function(){delI(i);}))return;tkt.splice(i,1);renderTkt();updTotal();}
 function sousTotal(){return tkt.reduce(function(s,it){return s+Math.round(it.pv*it.qty);},0);}
 // Remise toujours entière et comprise entre 0 et le sous-total (une remise négative AUGMENTAIT le total).
 function getRemise(sub){if(typeof hasRemisePermission==='function'&&window.currentUser&&!hasRemisePermission())return 0;var r=Math.round(parseFloat(g('remF').value)||0);if(r<0)r=0;if(r>sub)r=sub;return r;}
@@ -2051,7 +2051,7 @@ function calcDeltaItems(sentQtyMap,currentItems){
 function reprendreAttente(id){
   var idx=cmdAttente.findIndex(function(c){return c.id===id;});
   if(idx<0)return;
-  if(tkt.length&&!confirm('Remplacer le ticket actuel ?'))return;
+  if(tkt.length&&!fssAsk('Remplacer le ticket actuel ?',function(){reprendreAttente(id);}))return;
   var c=cmdAttente[idx];
   tkt=JSON.parse(JSON.stringify(c.items));
   resumingAttenteId=c.id;
@@ -2085,7 +2085,7 @@ function reprendreAttente(id){
 }
 function supprimerAttente(id){
   if(window.hasSuppressionAttentePermission&&!window.hasSuppressionAttentePermission()){toast('Vous n\'avez pas le droit de supprimer une commande en attente','e');return;}
-  if(!confirm('Supprimer ?'))return;
+  if(!fssAsk('Supprimer ?',function(){supprimerAttente(id);}))return;
   cmdAttente=cmdAttente.filter(function(c){return c.id!==id;});
   if(resumingAttenteId===id){
     // On annule explicitement la commande qu'on était en train de modifier : on vide aussi le ticket.
@@ -2103,7 +2103,7 @@ function supprimerAttente(id){
 function reimprimerBonComplet(id){
   var c=cmdAttente.find(function(x){return x.id===id;});
   if(!c){toast('Commande introuvable','e');return;}
-  if(!confirm('Réimprimer TOUT le bon de commande pour '+c.tableNom+' (y compris les articles déjà envoyés) ?'))return;
+  if(!fssAsk('Réimprimer TOUT le bon de commande pour '+c.tableNom+' (y compris les articles déjà envoyés) ?',function(){reimprimerBonComplet(id);}))return;
   var tousLesArticles=(c.items||[]).map(function(it){return{nom:it.nom,qty:it.qty||it.qt||1};});
   var nouveauLot={batchId:id+'-COMPLET-'+Date.now(),attenteId:id,numero:c.numero,tableNom:c.tableNom,srv:c.srv,heure:c.heure,items:tousLesArticles,ajout:false,reimpression:true};
   printBatches.push(nouveauLot);
@@ -2302,7 +2302,7 @@ function prtTester(id){
 }
 function prtSupprimer(id){
   var p=prt.cfg.printers.find(function(x){return x.id===id;});if(!p)return;
-  if(!confirm('Retirer l\'imprimante « '+p.nom+' » ?'))return;
+  if(!fssAsk('Retirer l\'imprimante « '+p.nom+' » ?',function(){prtSupprimer(id);}))return;
   prt.cfg.printers=prt.cfg.printers.filter(function(x){return x.id!==id;});
   if(p.type==='windows'){prt.cfg.ignorees=(prt.cfg.ignorees||[]).concat([p.winName]);}
   if(p.type==='network'){prt.cfg.ignorees=(prt.cfg.ignorees||[]).concat(['net:'+p.ip]);}
@@ -2420,11 +2420,11 @@ function prtInitAuto(){
     clearInterval(iv);prt.demande=true;
     window.electronAPI.printers.get().then(function(r){
       if(r.config.configure)return;
-      if(confirm('🖨️ Première utilisation : configurer maintenant les imprimantes (cuisine, bar, salle, caisse…) ?\n\nCette configuration se fait une seule fois, ensuite tout est automatique.')){
+      fssConfirm('🖨️ Première utilisation : configurer maintenant les imprimantes (cuisine, bar, salle, caisse…) ?\n\nCette configuration se fait une seule fois, ensuite tout est automatique.',function(){
         goPage('params');
         var btn=Array.prototype.slice.call(document.querySelectorAll('#pg-params .it')).filter(function(b){return /Périphériques/.test(b.textContent);})[0];
         goSub('params','dev',btn);
-      }
+      },null,{ok:'Configurer',cancel:'Plus tard'});
     }).catch(function(){});
   },3000);
 }
@@ -2470,6 +2470,7 @@ function testPrint(){
       '*{margin:0;padding:0}body{font-family:Arial;font-size:14px;padding:20mm;text-align:center}';
     w.document.write('<!DOCTYPE html><html><head><style>'+css+'</style></head><body><h3>TEST IMPRESSION</h3><p>FSS-CAISSE</p><p>'+new Date().toLocaleString('fr-FR')+'</p><p>✅ Imprimante fonctionnelle</p></body></html>');
     w.document.close();
+    w.onafterprint=function(){w.close();};setTimeout(function(){try{if(!w.closed)w.close();}catch(e){}},60000);
     setTimeout(function(){w.print();},300);
     g('devPrintStatus').textContent='✅ Test envoyé';g('devPrintStatus').style.color='#44FF88';
   },500);
@@ -2497,13 +2498,18 @@ function clearTk(silent){
   // (avant, elle revenait toujours dans la liste et semblait impossible à faire disparaître).
   if(!silent&&resumingAttenteId&&(!window.hasSuppressionAttentePermission||window.hasSuppressionAttentePermission())){
     var idASupprimer=resumingAttenteId;
-    if(confirm('Supprimer aussi cette commande en attente ?\n\nOK = la SUPPRIMER définitivement\nAnnuler = la garder dans « En attente »')){
+    fssConfirm('Supprimer aussi cette commande en attente ?\n\nSupprimer = la SUPPRIMER définitivement\nGarder = la laisser dans « En attente »',function(){
       cmdAttente=cmdAttente.filter(function(c){return c.id!==idASupprimer;});
       resumingAttenteId=null;resumingBaseItems=null;resumingSentQty=null;resumingNumero=null;
       try{if(window.fssRetirerCmdAttente)window.fssRetirerCmdAttente(idASupprimer);}catch(e){console.error(e);}
       try{renderAttenteBar();updateTableOptions();}catch(e){}
-    }
+      clearTkSuite(silent);
+    },function(){clearTkSuite(silent);},{ok:'Supprimer',cancel:'Garder'});
+    return;
   }
+  clearTkSuite(silent);
+}
+function clearTkSuite(silent){
   // Si le ticket en cours vient d'une commande REPRISE (déjà envoyée en
   // caisse/cuisine), "Annuler" ne doit jamais la faire disparaître purement
   // et simplement — elle est remise dans "Commandes en attente" telle
@@ -3092,6 +3098,7 @@ function imprimerCodeBarreArticle(){
     '</body></html>';
   var w=window.open('','_blank','width=300,height=300');
   w.document.write(html);w.document.close();
+  w.onafterprint=function(){w.close();};setTimeout(function(){try{if(!w.closed)w.close();}catch(e){}},60000);
   setTimeout(function(){w.print();},400);
 }
 function saveArt(){
@@ -3105,7 +3112,7 @@ function togArt(id){var a=arts.find(function(x){return x.id===id;});if(a){a.acti
 function delArt(id){
   var a=arts.find(function(x){return x.id===id;});
   var nom=a?a.nom:'cet article';
-  if(!confirm('Voulez-vous vraiment supprimer « '+nom+' » ?\n\nCette action est irréversible.'))return;
+  if(!fssAsk('Voulez-vous vraiment supprimer « '+nom+' » ?\n\nCette action est irréversible.',function(){delArt(id);}))return;
   arts=arts.filter(function(x){return x.id!==id;});
   renderArt();buildCats();renderProds('');
   toast('Article supprimé','i');
@@ -3222,7 +3229,7 @@ function lancerImportArticles(){
   }
   if(!parsed.length){toast('Aucun article valide trouvé dans ce fichier','e');return;}
   var replace=g('importReplace').checked;
-  if(replace&&!confirm(parsed.length+' article(s) vont remplacer TOUT le catalogue actuel ('+arts.length+' article(s) existants seront supprimés). Continuer ?'))return;
+  if(replace&&!fssAsk(parsed.length+' article(s) vont remplacer TOUT le catalogue actuel ('+arts.length+' article(s) existants seront supprimés). Continuer ?',function(){lancerImportArticles();}))return;
   importArticles(parsed,replace);
   closeM('ovImportArt');
   toast(parsed.length+' article(s) importé(s)','s');
@@ -3235,7 +3242,7 @@ function importArticles(newArts,replace){
 }
 function viderArticlesConfirm(){
   if(!arts.length){toast('Le catalogue est déjà vide','i');return;}
-  if(!confirm('Supprimer TOUS les '+arts.length+' articles du catalogue ? Cette action est irréversible — vous pourrez ensuite importer une nouvelle liste ou saisir les articles un par un.'))return;
+  if(!fssAsk('Supprimer TOUS les '+arts.length+' articles du catalogue ? Cette action est irréversible — vous pourrez ensuite importer une nouvelle liste ou saisir les articles un par un.',function(){viderArticlesConfirm();}))return;
   viderArticles();
   toast('Catalogue vidé','i');
 }
@@ -3445,7 +3452,7 @@ function saveEmp(){
   editEmpId=null;closeM('ovEmp');renderEmp();renderPtgLive();renderPaie();toast('Enregistré','s');
 }
 function delEmp(id){
-  if(!confirm('Retirer cet employé ?'))return;
+  if(!fssAsk('Retirer cet employé ?',function(){delEmp(id);}))return;
   employes=employes.filter(function(e){return e.id!==id;});
   renderEmp();renderPtgLive();renderPaie();toast('Supprimé','i');
 }
@@ -3744,7 +3751,7 @@ function saveFour(){
 }
 function delFour(id){fours=fours.filter(function(f){return f.id!==id;});renderFour();toast('Supprimé','i');}
 function delCmd(id){
-  if(!confirm('Supprimer ce bon de commande ?'))return;
+  if(!fssAsk('Supprimer ce bon de commande ?',function(){delCmd(id);}))return;
   cmds=cmds.filter(function(c){return c.id!==id;});
   renderCmd();
   toast('Bon de commande supprimé','i');
@@ -3834,9 +3841,10 @@ function annulerTicket(id){
   var t=txs.find(function(x){return x.id===id;});
   if(!t){toast('Ticket introuvable','e');return;}
   if(t.stat==='Annulé'){toast('Ce ticket est déjà annulé','i');return;}
-  if(!confirm('Annuler le ticket '+t.id+' ('+fmt(t.ttc)+') ?\nLes articles seront remis en stock et le montant retiré des totaux.'))return;
-  var motif=(prompt('Motif de l\'annulation (obligatoire) :','')||'').trim();
+  fssSaisie('Annuler le ticket '+t.id+' ('+fmt(t.ttc)+') ?\nLes articles seront remis en stock et le montant retiré des totaux.\n\nMotif de l\'annulation (obligatoire) :','',function(motif){
+  motif=(motif||'').trim();
   if(!motif){toast('Annulation refusée : indiquez un motif','e');return;}
+  if(t.stat==='Annulé')return;
   t.stat='Annulé';t.annuleMotif=motif;t.annulePar=(window.currentUser&&window.currentUser.nom)||'—';t.annuleLe=new Date().toISOString();
   // Remise en stock (une seule fois par ticket)
   if(!t.stkRemis){
@@ -3850,6 +3858,7 @@ function annulerTicket(id){
   renderRap();renderTkList();
   if(window.fssSyncPushImmediate)window.fssSyncPushImmediate();else if(window.fssSyncPush)window.fssSyncPush();
   toast('Ticket '+t.id+' annulé','s');
+  },null,{ok:'Annuler le ticket',cancel:'Retour',obligatoire:true});
 }
 function renderLC(){
   var b=g('bLC');if(!b)return;b.innerHTML='';
@@ -4086,7 +4095,7 @@ function addEntree(){
 function renderPrls(){var w=g('prelList');if(!w)return;var tot=prls.reduce(function(s,p){return s+p.mnt;},0);if(!prls.length){w.innerHTML='<span style="color:#444">Aucune sortie de caisse</span>';}else{w.innerHTML='';prls.forEach(function(p){var d=document.createElement('div');d.style.cssText='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #222;font-size:12px';d.innerHTML='<span>'+p.heure+' — '+p.motif+'</span><span style="color:#FF4444;font-weight:700">'+fmt(p.mnt)+'</span>';w.appendChild(d);});}g('clPrel').textContent=fmt(tot);}
 function doCloture(){
   if(!prls.length){toast('Veuillez effectuer au moins un prélèvement avant de clôturer la caisse','e');return;}
-  if(!confirm('Confirmer la clôture ?'))return;
+  if(!fssAsk('Confirmer la clôture ?',function(){doCloture();}))return;
   afficherBilanCloture();
   // Archive un vrai enregistrement d'historique (avant, "archivée" ne faisait
   // rien de réel) — permet de retrouver et réimprimer n'importe quelle
@@ -4831,7 +4840,7 @@ function saveTable(){
   toast('Table enregistrée','s');
 }
 function delTable(n){
-  if(!confirm('Supprimer cette table ?'))return;
+  if(!fssAsk('Supprimer cette table ?',function(){delTable(n);}))return;
   tables=tables.filter(function(t){return t.n!==n;});
   initTables();updateTableOptions();
   if(window.fssSupprimerTable)window.fssSupprimerTable(n);
@@ -4911,7 +4920,7 @@ function saveCaisse(){
 }
 function delCaisse(nom){
   if(caisses.length<=1){toast('Il doit rester au moins une caisse','e');return;}
-  if(!confirm('Supprimer "'+nom+'" ?'))return;
+  if(!fssAsk('Supprimer "'+nom+'" ?',function(){delCaisse(nom);}))return;
   caisses=caisses.filter(function(c){return c!==nom;});
   initCaisses();
   if(window.fssSyncPush)window.fssSyncPush();
@@ -5252,7 +5261,7 @@ function delCat(nom){
     g('ovReaffectCatMsg').textContent=nbArts+' article(s) utilisent encore "'+nom+'". Choisissez la catégorie vers laquelle les déplacer avant de supprimer "'+nom+'".';
     g('ovReaffectCat').classList.add('on');
   }else{
-    if(!confirm('Supprimer la catégorie "'+nom+'" ?'))return;
+    if(!fssAsk('Supprimer la catégorie "'+nom+'" ?',function(){delCat(nom);}))return;
     supprimerCategorieMaintenant(nom);
   }
 }
@@ -5341,7 +5350,7 @@ function appliquerSauvegardeRestauree(jsonContent,sourceLabel){
   renderHistoriqueSauvegardes();
 }
 function restaurerBackup(filename){
-  if(!confirm("Restaurer cette sauvegarde va REMPLACER toutes les données actuelles (articles, ventes, clients, tout) sur TOUS les postes connectés.\n\nCette action est irréversible. Continuer ?"))return;
+  if(!fssAsk("Restaurer cette sauvegarde va REMPLACER toutes les données actuelles (articles, ventes, clients, tout) sur TOUS les postes connectés.\n\nCette action est irréversible. Continuer ?",function(){restaurerBackup(filename);},{ok:'Restaurer'}))return;
   window.electronAPI.readBackup(filename).then(function(result){
     if(!result.success){toast('Erreur : '+(result.error||''),'e');return;}
     appliquerSauvegardeRestauree(result.content,filename);
@@ -5352,8 +5361,7 @@ function restaurerDepuisFichier(){
   window.electronAPI.openBackupFileDialog().then(function(result){
     if(result.canceled)return;
     if(!result.success){toast('Erreur : '+(result.error||''),'e');return;}
-    if(!confirm("Restaurer ce fichier va REMPLACER toutes les données actuelles (articles, ventes, clients, tout) sur TOUS les postes connectés.\n\nCette action est irréversible. Continuer ?"))return;
-    appliquerSauvegardeRestauree(result.content,result.filePath);
+    fssConfirm("Restaurer ce fichier va REMPLACER toutes les données actuelles (articles, ventes, clients, tout) sur TOUS les postes connectés.\n\nCette action est irréversible. Continuer ?",function(){appliquerSauvegardeRestauree(result.content,result.filePath);},null,{ok:'Restaurer'});
   });
 }
 // Sauvegarde automatique : une fois au démarrage (si la dernière sauvegarde
@@ -5617,8 +5625,67 @@ document.addEventListener('DOMContentLoaded',function(){
 /* Animation toujours active, même si Windows a désactivé les animations (prefers-reduced-motion) */
 </style>
 <script>
-// Après alert()/confirm()/prompt(), Electron/Windows peut laisser la fenêtre sans focus clavier (écran « figé » jusqu'à Alt) : on le rend.
-(function(){['alert','confirm','prompt'].forEach(function(n){var o=window[n];if(!o)return;window[n]=function(){var r=o.apply(window,arguments);try{if(window.electronAPI&&window.electronAPI.refocus)window.electronAPI.refocus();}catch(e){}return r;};});})();
+// Plus AUCUNE boîte de dialogue native (alert/confirm/prompt) : elles bloquent le moteur de la page et font perdre le
+// focus clavier à Electron/Windows (écran « figé » jusqu'à la touche Alt). Remplacées par des fenêtres internes non bloquantes.
+(function(){
+  var courant=null,accorde=false;
+  function refocus(){try{if(window.electronAPI&&window.electronAPI.refocus)window.electronAPI.refocus();}catch(e){}}
+  function fermer(ov,onKey,prev){
+    try{document.removeEventListener('keydown',onKey,true);}catch(e){}
+    try{if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);}catch(e){}
+    if(courant&&courant.ov===ov)courant=null;
+    try{if(prev&&prev.focus&&document.body.contains(prev))prev.focus();else if(document.body)document.body.focus();}catch(e){}
+    refocus();[200,800].forEach(function(d){setTimeout(refocus,d);});
+  }
+  function ouvrir(msg,saisie,def,onOk,onCancel,o){
+    o=o||{};
+    if(courant){try{courant.annuler();}catch(e){}}
+    var prev=document.activeElement,ov=document.createElement('div'),fini=false;
+    ov.id='fssDlg';ov.setAttribute('role','dialog');ov.setAttribute('aria-modal','true');
+    ov.style.cssText='position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483000;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;padding:16px;box-sizing:border-box';
+    var box=document.createElement('div');
+    box.style.cssText='background:#1c1c1c;border:1px solid #333;border-radius:12px;padding:22px 24px;width:100%;max-width:420px;color:#eee;box-shadow:0 10px 40px rgba(0,0,0,.6)';
+    var m=document.createElement('div');m.textContent=msg;m.style.cssText='white-space:pre-line;font-size:14px;line-height:1.5;margin-bottom:16px;word-break:break-word';box.appendChild(m);
+    var inp=null;
+    if(saisie){inp=document.createElement('input');inp.type='text';inp.value=def||'';inp.autocomplete='off';inp.style.cssText='width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #444;background:#0e0e0e;color:#fff;font-size:14px;margin-bottom:14px';box.appendChild(inp);}
+    var bar=document.createElement('div');bar.style.cssText='display:flex;gap:10px;justify-content:flex-end';
+    function bouton(txt,fond){var b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='padding:10px 18px;border:0;border-radius:6px;color:#fff;font-weight:bold;font-size:13px;cursor:pointer;background:'+fond;return b;}
+    var bNon=bouton(o.cancel||'Annuler','#444'),bOui=bouton(o.ok||'OK','#CC0000');
+    bar.appendChild(bNon);bar.appendChild(bOui);box.appendChild(bar);ov.appendChild(box);
+    function annuler(){if(fini)return;fini=true;fermer(ov,onKey,prev);if(onCancel)try{onCancel();}catch(e){console.error(e);}}
+    function valider(){
+      if(fini)return;
+      var v=inp?inp.value:true;
+      if(inp&&o.obligatoire&&!String(v).trim()){inp.style.borderColor='#FF4444';inp.focus();return;}
+      fini=true;fermer(ov,onKey,prev);
+      if(onOk)try{onOk(v);}catch(e){console.error(e);}
+    }
+    function onKey(e){
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();annuler();}
+      else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();valider();}
+      else if(e.key==='Tab'){var els=[inp,bNon,bOui].filter(Boolean),i=els.indexOf(document.activeElement);e.preventDefault();els[(i+(e.shiftKey?-1:1)+els.length)%els.length].focus();}
+    }
+    bNon.onclick=annuler;bOui.onclick=valider;
+    document.addEventListener('keydown',onKey,true);
+    document.body.appendChild(ov);
+    courant={ov:ov,annuler:annuler};
+    setTimeout(function(){try{(inp||bOui).focus();if(inp)inp.select();}catch(e){}},0);
+    refocus();
+  }
+  // Confirmation non bloquante : onOk() si l'utilisateur valide, onCancel() sinon.
+  window.fssConfirm=function(msg,onOk,onCancel,o){ouvrir(msg,false,null,onOk,onCancel,o);};
+  // Saisie d'un texte : onOk(texte).
+  window.fssSaisie=function(msg,def,onOk,onCancel,o){ouvrir(msg,true,def,onOk,onCancel,o);};
+  // Forme « à relancer » : if(!fssAsk(msg,function(){maFonction(args);}))return; — la fonction est rappelée après validation.
+  window.fssAsk=function(msg,retry,o){
+    if(accorde){accorde=false;return true;}
+    ouvrir(msg,false,null,function(){accorde=true;try{retry();}finally{accorde=false;}},null,o);
+    return false;
+  };
+  window.alert=function(m){try{toast(String(m),'i');}catch(e){}};
+  window.confirm=function(){console.warn('confirm() natif désactivé : utiliser fssConfirm');return false;};
+  window.prompt=function(){console.warn('prompt() natif désactivé : utiliser fssSaisie');return null;};
+})();
 </script>
 <script src="login-watermark.js"></script>
 <script src="auth.js"></script>

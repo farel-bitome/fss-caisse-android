@@ -271,7 +271,9 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
       res.header('Access-Control-Allow-Origin', '*');
       res.json({ ok: true });
     });
-    expressApp.use(express.json({ limit: '10mb' }));
+    // 'risque' : le corps contient < > ou un guillemet échappé -> seulement alors on parcourt les données pour les assainir
+    // (évite de reparcourir tout l'état à chaque envoi : le serveur tourne dans le processus principal de l'application).
+    expressApp.use(express.json({ limit: '10mb', verify: function (req, res, buf) { try { req.risque = /[<>]|\\"/.test(buf.toString('latin1')); } catch (e) { req.risque = true; } } }));
     // ---- Sessions : un jeton est délivré à la connexion (mot de passe vérifié par le serveur) ----
     const sessions = new Map();
     const DUREE_SESSION = 12 * 3600 * 1000;
@@ -350,7 +352,7 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     expressApp.use('/api', function (req, res, next) {
       if (req.method === 'GET' && req.path === '/state') return next(); // vue publique si non connecté
       if (requeteAutorisee(req)) {
-        if (req.method === 'POST' && req.body && !/^\/(printbatches|airtel|pvit)/.test(req.path)) assainir(req.body);
+        if (req.method === 'POST' && req.body && req.risque && !/^\/(printbatches|airtel|pvit)/.test(req.path)) assainir(req.body);
         return next();
       }
       res.status(401).json({ ok: false, error: 'non autorisé' });
@@ -756,7 +758,6 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
         nouvelEtat.attenteSeq = Math.max(Number(state.attenteSeq) || 1, Number(nouvelEtat.attenteSeq) || 1);
         nouvelEtat.razLog = undefined; delete nouvelEtat.razLog;
         nouvelEtat.razCles = state.razCles || [];
-        assainir(nouvelEtat);
         state = nouvelEtat;
         saveState(state);
         diffuserEtat();

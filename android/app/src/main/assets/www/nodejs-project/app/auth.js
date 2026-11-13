@@ -521,7 +521,7 @@
     var u = (window.users || []).find(function (x) { return x.id === id; });
     if (!u) return;
     if (u.super) { safeToast('Ce compte ne peut pas être supprimé', 'e'); return; }
-    if (!confirm('Supprimer l\'utilisateur "' + u.nom + '" ?')) return;
+    if (!fssAsk('Supprimer l\'utilisateur "' + u.nom + '" ?', function () { deleteUser(id); })) return;
     users = users.filter(function (x) { return x.id !== id; });
     window.users = users;
     window.usersRev = (window.usersRev || 0) + 1; if (window.fssSyncPush) window.fssSyncPush();
