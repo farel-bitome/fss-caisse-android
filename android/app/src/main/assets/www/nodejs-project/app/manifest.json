@@ -1,7 +1,7 @@
 {
   "name": "FSS-CAISSE",
   "short_name": "FSS-CAISSE",
-  "description": "FSS-CAISSE - Gestion Restobar",
+  "description": "FSS-CAISSE",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
