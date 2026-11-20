@@ -188,7 +188,10 @@
   function hasAccess(u, moduleKey) {
     if (!u) return false;
     if (u.super || u.full) return true;
-    if (u.waiterOnly) return moduleKey === 'caisse';
+    // Plan de salle (onglet Tables) : indispensable à tout poste de vente. Il suit l'accès Caisse (caissier, serveur...) :
+    // la gestion des tables (ajout / suppression) reste dans Paramètres, réservée à ceux qui y ont droit.
+    if (u.waiterOnly) return moduleKey === 'caisse' || moduleKey === 'tables';
+    if (moduleKey === 'tables' && (u.perms || []).indexOf('caisse') !== -1) return true;
     return (u.perms || []).indexOf(moduleKey) !== -1;
   }
 
