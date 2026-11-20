@@ -5343,6 +5343,8 @@ function appliquerSauvegardeRestauree(jsonContent,sourceLabel){
   try{data=JSON.parse(jsonContent);}catch(e){toast('Fichier de sauvegarde invalide','e');return;}
   if(!data||typeof data!=='object'){toast('Fichier de sauvegarde invalide','e');return;}
   if(!window.fssApplyState){toast('Fonction indisponible','e');return;}
+  // Anciens lots d'impression de la sauvegarde = déjà imprimés : on garde la liste actuelle (pas de réimpression).
+  data.printBatches=(window.printBatches||[]).slice();
   window.fssApplyState(data);
   // Propage l'état restauré à tous les postes connectés
   if(window.fssSyncPush)window.fssSyncPush();
