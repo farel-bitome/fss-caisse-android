@@ -269,7 +269,7 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
     // Seul /api/ping (aucune donnée) reste lisible de l'extérieur (test d'adresse du serveur).
     expressApp.get('/api/ping', function (req, res) {
       res.header('Access-Control-Allow-Origin', '*');
-      res.json({ ok: true });
+      res.json({ ok: true, app: 'FSS-CAISSE', nom: (state && state.etab && state.etab.nom) || '' });
     });
     // 'risque' : le corps contient < > ou un guillemet échappé -> seulement alors on parcourt les données pour les assainir
     // (évite de reparcourir tout l'état à chaque envoi : le serveur tourne dans le processus principal de l'application).
@@ -661,6 +661,11 @@ module.exports = function startEmbeddedServer(port, userDataDir, appRootDir) {
             nouvelEtat.arts = nouvelEtat.arts.concat(manquants);
             ecrireJournal('Catalogue : ' + manquants.length + ' article(s) du serveur conservé(s) (le poste ne les connaissait pas)');
           }
+        }
+        // Réglage « gestion de stock » par catégorie : un poste en retard ne l'écrase jamais (numéro de révision).
+        if (state && (state.catAlerteRev || 0) > (nouvelEtat.catAlerteRev || 0)) {
+          nouvelEtat.categoryAlerteActive = state.categoryAlerteActive || {};
+          nouvelEtat.catAlerteRev = state.catAlerteRev;
         }
         // Comptes utilisateurs : un poste en retard (ancienne copie des comptes)
         // ne doit JAMAIS écraser un changement plus récent (mot de passe,

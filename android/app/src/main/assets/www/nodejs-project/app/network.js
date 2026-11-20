@@ -40,7 +40,7 @@
       prls: prls, entrees: entrees, cmdAttente: cmdAttente, nextTk: nextTk, attenteSeq: attenteSeq,
       users: users, nextUserId: nextUserId, usersRev: window.usersRev || 0, logo: logoData, etab: etabInfo, tables: tables, servers: servers, caisses: caisses, categories: categories, fondsOuverture: fondsOuverture, printBatches: printBatches,
       clotureHistorique: clotureHistorique,
-      categoryAlerteActive: categoryAlerteActive,
+      categoryAlerteActive: categoryAlerteActive, catAlerteRev: window.catAlerteRev || 0,
       artsUpdatedAt: window.artsUpdatedAt || 0,
       employes: employes, pointages: pointages, paieEntries: paieEntries
     };
@@ -154,8 +154,13 @@
     window.caisses = caisses;
     if (Array.isArray(s.categories)) categories = s.categories;
     window.categories = categories;
-    categoryAlerteActive = s.categoryAlerteActive || {};
-    window.categoryAlerteActive = categoryAlerteActive;
+    // Réglage « gestion de stock » des catégories : si ce poste vient de le modifier et que le serveur ne l'a pas encore
+    // reçu (diffusion plus ancienne), on garde la version locale — sinon la case revenait en arrière toute seule.
+    if ((window.catAlerteRev || 0) <= (s.catAlerteRev || 0)) {
+      categoryAlerteActive = s.categoryAlerteActive || {};
+      window.categoryAlerteActive = categoryAlerteActive;
+      window.catAlerteRev = s.catAlerteRev || 0;
+    }
     window.artsUpdatedAt = s.artsUpdatedAt || window.artsUpdatedAt || 0;
     if (s.fondsOuverture) fondsOuverture = s.fondsOuverture;
     window.fondsOuverture = fondsOuverture;

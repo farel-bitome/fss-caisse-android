@@ -5208,8 +5208,9 @@ function initCategories(){
 // cette catégorie (au lieu de gérer un seuil chiffré) — les articles
 // concernés ne remonteront plus dans la liste "stock faible" tant que c'est
 // désactivé, quel que soit leur stock réel.
+function majRevCatAlerte(){window.catAlerteRev=Math.max(Date.now(),(window.catAlerteRev||0)+1);}
 function toggleAlerteCategorie(cat,actif){
-  categoryAlerteActive[cat]=actif;
+  categoryAlerteActive[cat]=actif;majRevCatAlerte();
   var nbOff=0;
   if(!actif){arts.forEach(function(a){if(a.cat===cat){if(a.alerte!==false)nbOff++;a.alerte=false;delete a.stkRemis;}});window.artsUpdatedAt=Date.now();}
   initCategories();
@@ -5231,7 +5232,7 @@ function saveCat(){
     var idx=categories.indexOf(editCatNom);
     if(idx>=0)categories[idx]=nom;
     arts.forEach(function(a){if(a.cat===editCatNom)a.cat=nom;});
-    if(categoryAlerteActive[editCatNom]!=null){categoryAlerteActive[nom]=categoryAlerteActive[editCatNom];delete categoryAlerteActive[editCatNom];}
+    if(categoryAlerteActive[editCatNom]!=null){categoryAlerteActive[nom]=categoryAlerteActive[editCatNom];delete categoryAlerteActive[editCatNom];majRevCatAlerte();}
   }else{
     categories.push(nom);
   }
@@ -5277,7 +5278,7 @@ function confirmerReaffectationCat(){
 }
 function supprimerCategorieMaintenant(nom){
   categories=categories.filter(function(c){return c!==nom;});
-  delete categoryAlerteActive[nom];
+  delete categoryAlerteActive[nom];majRevCatAlerte();
   categorieEnSuppressionNom=null;
   renderArt();buildCats();renderProds('');
   initCategories();
